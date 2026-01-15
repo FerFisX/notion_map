@@ -1,46 +1,45 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles # <--- NUEVO
+from fastapi.responses import FileResponse # <--- NUEVO
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import sys
 import os
 
-# Truco para que Python encuentre la carpeta 'src'
+# Ajustar path para importar src
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
 from src.rag_engine import RagEngine
 
 app = FastAPI(title="NotionMap API")
 
-# Configurar CORS (Para que el Frontend pueda hablar con el Backend sin errores de seguridad)
+# CORS (Sigue siendo útil)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En producción esto se cambia, pero para MVP está bien
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Inicializamos el motor UNA sola vez al arrancar (para no cargar el modelo en cada clic)
-print("🚀 Cargando motor de IA...")
+# Inicializar motor
 engine = RagEngine()
-print("✅ Motor listo.")
 
-# Definimos qué formato de datos esperamos recibir del frontend
 class QueryRequest(BaseModel):
     question: str
 
-@app.post("/generate-roadmap")
+@app.post("/generate-roadmap") # Ruta de la API
 async def generate_roadmap_endpoint(request: QueryRequest):
-    """
-    Recibe una pregunta, consulta al RAG y devuelve el JSON del roadmap.
-    """
     try:
-        # Llamamos a tu cerebro Python
         result = engine.generate_roadmap(request.question)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- AQUÍ ESTÁ EL TRUCO PARA RENDER ---
+# Montamos la carpeta frontend para que sea accesible
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
+
+# Ruta raíz carga el index.html
 @app.get("/")
-def read_root():
-    return {"status": "NotionMap API is running correctly"}
+async def read_index():
+    return FileResponse('frontend/index.html')
