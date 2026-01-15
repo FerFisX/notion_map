@@ -1,18 +1,16 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles # <--- NUEVO
-from fastapi.responses import FileResponse # <--- NUEVO
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import sys
 import os
 
-# Ajustar path para importar src
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.rag_engine import RagEngine
 
 app = FastAPI(title="NotionMap API")
 
-# CORS (Sigue siendo útil)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,25 +19,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Inicializar motor
-engine = RagEngine()
+# --- CAMBIO IMPORTANTE AQUÍ ---
+# 1. Ya NO iniciamos el motor aquí. Lo dejamos vacío por ahora.
+engine = None 
 
 class QueryRequest(BaseModel):
     question: str
 
-@app.post("/generate-roadmap") # Ruta de la API
+def get_engine():
+    """Función para cargar el motor solo cuando se necesite"""
+    global engine
+    if engine is None:
+        print("⏳ Cargando motor de IA por primera vez... (Esto puede tardar un poco)")
+        engine = RagEngine()
+        print("✅ Motor cargado y listo.")
+    return engine
+
+@app.post("/generate-roadmap")
 async def generate_roadmap_endpoint(request: QueryRequest):
     try:
-        result = engine.generate_roadmap(request.question)
+        # 2. Llamamos a la función que revisa si el motor está listo
+        rag = get_engine()
+        result = rag.generate_roadmap(request.question)
         return result
     except Exception as e:
+        # Tip: Imprimimos el error en los logs de Render para poder depurar
+        print(f"❌ Error generando roadmap: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- AQUÍ ESTÁ EL TRUCO PARA RENDER ---
-# Montamos la carpeta frontend para que sea accesible
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
-# Ruta raíz carga el index.html
 @app.get("/")
 async def read_index():
     return FileResponse('frontend/index.html')
