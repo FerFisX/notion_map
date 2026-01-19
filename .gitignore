@@ -1,0 +1,6 @@
+# Ignorar archivos de entorno
+.env
+.env.*
+
+# Permitir ejemplos de entorno
+!.env.example
