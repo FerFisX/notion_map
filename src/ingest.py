@@ -23,16 +23,16 @@ def main():
         docs.extend(PyPDFLoader(f).load())
 
     if not docs:
-        print("⚠️ No hay PDFs en la carpeta data/")
+        print("No hay PDFs en la carpeta data/")
         return
 
     # 2. Cortar texto
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = splitter.split_documents(docs)
-    print(f"✂️  Se generaron {len(chunks)} fragmentos.")
+    print(f"Se generaron {len(chunks)} fragmentos.")
 
     # 3. Guardar en ChromaDB (Local)
-    print("🧠 Creando embeddings locales (esto usa tu CPU, es gratis)...")
+    print("Creando embeddings locales (esto usa tu CPU, es gratis)...")
     
     # Este modelo se descarga una vez y vive en tu PC
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -42,7 +42,7 @@ def main():
         embedding=embeddings, 
         persist_directory=DB_PATH
     )
-    print("🎉 ¡Listo! Base de conocimiento creada localmente.")
+    print("Base de conocimiento lista")
 
 if __name__ == "__main__":
     main()

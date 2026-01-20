@@ -25,13 +25,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- INICIALIZACIÓN DEL MOTOR ---
-print("🚀 Arrancando NotionMap Local...")
+# --- Inicializacion
+print(" Arrancando NotionMap ...")
 try:
     engine = RagEngine()
-    print("✅ ¡Motor listo!")
+    print("Conectado")
 except Exception as e:
-    print(f"❌ Error cargando motor (verificar .env): {e}")
+    print(f"Error cargando motor (verificar .env): {e}")
     engine = None
 
 class QueryRequest(BaseModel):
@@ -43,7 +43,7 @@ async def generate_roadmap_endpoint(request: QueryRequest):
         raise HTTPException(status_code=500, detail="El motor de IA no está listo.")
     return engine.generate_roadmap(request.question)
 
-# --- ⚠️ AQUÍ ESTÁ EL ARREGLO DE RUTAS ---
+# ---  AQUÍ ESTÁ EL ARREGLO DE RUTAS ---
 
 # 1. Obtenemos la ruta de ESTE archivo (api/main.py)
 current_dir = os.path.dirname(os.path.abspath(__file__))
