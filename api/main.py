@@ -56,7 +56,7 @@ frontend_path = os.path.join(root_dir, "frontend")
 
 # Verificación de seguridad (te avisará en la terminal si no la encuentra)
 if not os.path.exists(frontend_path):
-    print(f"⚠️  ERROR: No encuentro la carpeta frontend en: {frontend_path}")
+    print(f"ERROR: No encuentro la carpeta frontend en: {frontend_path}")
     print("Asegúrate de que la carpeta 'frontend' esté en la misma carpeta que 'api' y 'src'.")
 
 # 4. Montamos los archivos estáticos

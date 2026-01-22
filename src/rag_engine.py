@@ -37,7 +37,7 @@ class RagEngine:
 
     def generate_roadmap(self, query: str):
         try:
-            print(f"🔎 Buscando contexto para: '{query}'...")
+            print(f"Buscando contexto para: '{query}'...")
             docs = self.vector_db.similarity_search(query, k=4)
             context = "\n".join([d.page_content for d in docs])
             
@@ -67,7 +67,7 @@ class RagEngine:
             return chain.invoke({"query": query, "context": context})
 
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"Error: {e}")
             return {
                 "title": "Error",
                 "steps": [{

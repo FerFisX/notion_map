@@ -14,8 +14,10 @@
 <body>
 
     <div class="sidebar">
-        <h2>NotionMap</h2>
-        <p>Generador de Roadmaps Corporativos</p>
+        <div class="sidebar-header">
+            <h2>NotionMap </h2>
+            <p>Generador de Roadmaps Corporativos</p>
+        </div>
         
         <div class="input-group">
             <input type="text" id="queryInput" placeholder="Ej: Pasos para definir alcance...">
@@ -23,11 +25,11 @@
         </div>
 
         <div id="loading" class="hidden">
-             Analizando documentos...
+            Analizando documentos...
         </div>
 
         <div class="instructions">
-            <p> <b>Tip:</b> Haz doble clic en el mapa o en la lista de abajo para profundizar en un tema.</p>
+            <p><b>Tip:</b> Haz doble clic en el mapa o en la lista de abajo para profundizar en un tema.</p>
         </div>
 
         <div class="node-list-container">
@@ -40,7 +42,22 @@
         </div>
     </div>
 
-    <div id="cy"></div>
+    <div class="main-content">
+        
+        <div id="breadcrumbs" class="breadcrumbs-container">
+            <span class="crumb active">Inicio</span>
+        </div>
+
+        <div id="activeContext" class="context-banner hidden">
+            <div class="context-icon">Contexto Padre</div>
+            <div class="context-content">
+                <h3 id="contextTitle">Título del Nodo</h3>
+                <p id="contextDesc">Descripción del nodo padre...</p>
+            </div>
+        </div>
+
+        <div id="cy"></div>
+    </div>
 
     <script src="/static/script.js"></script>
 </body>
