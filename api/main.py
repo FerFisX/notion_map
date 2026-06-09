@@ -43,6 +43,19 @@ async def generate_roadmap_endpoint(request: QueryRequest):
         raise HTTPException(status_code=500, detail="El motor de IA no está listo.")
     return engine.generate_roadmap(request.question)
 
+@app.post("/sync-notion")
+async def sync_notion_endpoint():
+    global engine
+
+    try:
+        from src.ingest_notion import sync_notion_to_chroma
+
+        sync_notion_to_chroma()
+        engine = RagEngine()
+        return {"status": "ok", "message": "Notion sincronizado en ChromaDB"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ---  AQUÍ ESTÁ EL ARREGLO DE RUTAS ---
 
 # 1. Obtenemos la ruta de ESTE archivo (api/main.py)

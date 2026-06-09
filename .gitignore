@@ -1,6 +1,17 @@
 # Ignorar archivos de entorno
 .env
 .env.*
+env/
+venv/
+.venv/
 
 # Permitir ejemplos de entorno
 !.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Bases y artefactos generados localmente
+vectorstore/
+data/notion_exports/
