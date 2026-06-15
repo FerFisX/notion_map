@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from pathlib import Path
@@ -17,6 +18,7 @@ load_dotenv()
 
 DB_PATH = "vectorstore/chroma_db"
 EXPORT_PATH = Path("data/notion_exports")
+SKIPPED_PAGES_REPORT = EXPORT_PATH / "skipped_pages.json"
 MAX_SECTION_CHARS = 1600
 SECTION_OVERLAP_CHARS = 200
 
@@ -59,6 +61,22 @@ def _notion_id(value: str) -> str:
     if matches:
         return matches[-1]
     return value
+
+
+def _compact_id(value: str) -> str:
+    return _notion_id(value).replace("-", "")
+
+
+def _database_id_from_page_url(page: dict) -> Optional[str]:
+    page_id = page.get("id") or page.get("page_id", "")
+    url = page.get("url", "")
+    if not page_id or not url:
+        return None
+
+    url_id = _notion_id(url)
+    if _compact_id(url_id) == _compact_id(page_id):
+        return None
+    return url_id
 
 
 def _sanitize_block(block: dict) -> dict:
@@ -125,23 +143,54 @@ def _database_pages(notion: Client, database_id: str) -> Iterable[dict]:
 def _configured_pages(notion: Client) -> List[dict]:
     pages = []
     max_pages = _env_int("NOTION_MAX_PAGES")
+    seen_page_ids = set()
+
+    def add_page(page: dict) -> None:
+        page_id = page.get("id")
+        if page_id and page_id not in seen_page_ids:
+            pages.append(page)
+            seen_page_ids.add(page_id)
 
     for page_id in _env_csv("NOTION_PAGE_ID"):
-        pages.append(notion.pages.retrieve(page_id=_notion_id(page_id)))
+        add_page(notion.pages.retrieve(page_id=_notion_id(page_id)))
         if max_pages and len(pages) >= max_pages:
             return pages
 
     database_id = os.getenv("NOTION_DATABASE_ID")
     if database_id:
         for page in _database_pages(notion, database_id):
-            pages.append(page)
+            add_page(page)
             if max_pages and len(pages) >= max_pages:
                 break
 
     return pages
 
 
-def _export_page_markdown(notion: Client, page: dict) -> Optional[Document]:
+def _skipped_page_info(page: dict, error: APIResponseError) -> dict:
+    return {
+        "title": _page_title(page),
+        "page_id": page.get("id", ""),
+        "url": page.get("url", ""),
+        "last_edited_time": page.get("last_edited_time", ""),
+        "archived": page.get("archived", False),
+        "in_trash": page.get("in_trash", False),
+        "error_code": str(error.code),
+        "error_message": str(error),
+    }
+
+
+def _write_skipped_pages_report(skipped_pages: List[dict]) -> None:
+    EXPORT_PATH.mkdir(parents=True, exist_ok=True)
+    SKIPPED_PAGES_REPORT.write_text(
+        json.dumps(skipped_pages, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _export_page_markdown(
+    notion: Client,
+    page: dict,
+) -> Optional[Document]:
     page_id = page["id"]
     title = _page_title(page)
     sanitized_client = SanitizedNotionClient(notion)
@@ -149,8 +198,8 @@ def _export_page_markdown(notion: Client, page: dict) -> Optional[Document]:
     try:
         markdown = converter.to_string(sanitized_client.get_children(page_id))
     except APIResponseError as e:
-        print(f"Saltando pagina inaccesible: {title} ({page_id}) - {e.code}")
-        return None
+        print(f"No se pudo exportar como pagina: {title} ({page_id}) - {e.code}")
+        raise
     markdown = markdown.strip()
 
     if not markdown:
@@ -170,6 +219,33 @@ def _export_page_markdown(notion: Client, page: dict) -> Optional[Document]:
         "export_file": str(export_file),
     }
     return Document(page_content=markdown, metadata=metadata)
+
+
+def _export_referenced_database_pages(
+    notion: Client,
+    page: dict,
+    skipped_pages: List[dict],
+) -> List[Document]:
+    referenced_database_id = _database_id_from_page_url(page)
+    if not referenced_database_id:
+        return []
+
+    title = _page_title(page)
+    try:
+        nested_pages = list(_database_pages(notion, referenced_database_id))
+    except APIResponseError as e:
+        print(f"No se pudo expandir como database: {title} - {e.code}")
+        return []
+
+    print(f"Expandiendo database referenciada: {title} ({len(nested_pages)} paginas)")
+    docs = []
+    for nested_page in nested_pages:
+        try:
+            docs.append(_export_page_markdown(notion, nested_page))
+        except APIResponseError as e:
+            skipped_pages.append(_skipped_page_info(nested_page, e))
+
+    return [doc for doc in docs if doc is not None]
 
 
 def _split_notion_documents(docs: List[Document]) -> List[Document]:
@@ -216,16 +292,20 @@ def sync_notion_to_chroma() -> None:
         raise RuntimeError("Configura NOTION_PAGE_ID o NOTION_DATABASE_ID en .env")
 
     docs = []
-    skipped_pages = 0
+    skipped_pages = []
     for page in pages:
-        doc = _export_page_markdown(notion, page)
-        if doc is None:
-            skipped_pages += 1
-            continue
-        docs.append(doc)
+        try:
+            docs.append(_export_page_markdown(notion, page))
+        except APIResponseError as e:
+            database_docs = _export_referenced_database_pages(notion, page, skipped_pages)
+            if database_docs:
+                docs.extend(database_docs)
+            else:
+                skipped_pages.append(_skipped_page_info(page, e))
 
     if not docs:
         raise RuntimeError("No se pudo exportar ninguna pagina accesible desde Notion")
+    _write_skipped_pages_report(skipped_pages)
     chunks = _split_notion_documents(docs)
 
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -242,7 +322,8 @@ def sync_notion_to_chroma() -> None:
     vector_db.add_documents(chunks, ids=ids)
 
     print(f"Paginas exportadas: {len(docs)}")
-    print(f"Paginas saltadas: {skipped_pages}")
+    print(f"Paginas saltadas: {len(skipped_pages)}")
+    print(f"Reporte de paginas saltadas: {SKIPPED_PAGES_REPORT}")
     print(f"Chunks cargados en Chroma: {len(chunks)}")
     print("Chunking: secciones Markdown con fallback por tamano")
     print(f"Markdown generado en: {EXPORT_PATH}")
