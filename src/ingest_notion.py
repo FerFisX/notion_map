@@ -10,7 +10,7 @@ from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from notion_client import Client
-from notion_client.errors import APIResponseError
+from notion_client.errors import APIResponseError, RequestTimeoutError
 from notion2md.config import Config
 from notion2md.convertor.block import BlockConvertor
 
@@ -19,6 +19,8 @@ load_dotenv()
 DB_PATH = "vectorstore/chroma_db"
 EXPORT_PATH = Path("data/notion_exports")
 SKIPPED_PAGES_REPORT = EXPORT_PATH / "skipped_pages.json"
+LAST_EXPORTED_PAGES_REPORT = EXPORT_PATH / "last_exported_pages.json"
+SYNC_STATE_PATH = EXPORT_PATH / "sync_state.json"
 MAX_SECTION_CHARS = 1600
 SECTION_OVERLAP_CHARS = 200
 
@@ -166,7 +168,11 @@ def _configured_pages(notion: Client) -> List[dict]:
     return pages
 
 
-def _skipped_page_info(page: dict, error: APIResponseError) -> dict:
+def _error_code(error: Exception) -> str:
+    return str(getattr(error, "code", error.__class__.__name__))
+
+
+def _skipped_page_info(page: dict, error: Exception) -> dict:
     return {
         "title": _page_title(page),
         "page_id": page.get("id", ""),
@@ -174,7 +180,7 @@ def _skipped_page_info(page: dict, error: APIResponseError) -> dict:
         "last_edited_time": page.get("last_edited_time", ""),
         "archived": page.get("archived", False),
         "in_trash": page.get("in_trash", False),
-        "error_code": str(error.code),
+        "error_code": _error_code(error),
         "error_message": str(error),
     }
 
@@ -187,6 +193,114 @@ def _write_skipped_pages_report(skipped_pages: List[dict]) -> None:
     )
 
 
+def _status_label(sync_reason: str) -> str:
+    if sync_reason == "updated":
+        return "upd"
+    if sync_reason == "unchanged":
+        return "same"
+    return "new"
+
+
+def _exported_page_info(doc: Document, sync_reason: str) -> dict:
+    status = _status_label(sync_reason)
+    title = doc.metadata.get("title", "")
+    return {
+        "status": status,
+        "display_name": f"{status} {title}",
+        "title": title,
+        "page_id": doc.metadata.get("page_id", ""),
+        "url": doc.metadata.get("url", ""),
+        "last_edited_time": doc.metadata.get("last_edited_time", ""),
+        "export_file": doc.metadata.get("export_file", ""),
+    }
+
+
+def _referenced_database_state(page: dict, docs: List[Document]) -> dict:
+    return {
+        "type": "referenced_database",
+        "last_edited_time": page.get("last_edited_time", ""),
+        "title": _page_title(page),
+        "url": page.get("url", ""),
+        "referenced_database_id": _database_id_from_page_url(page),
+        "children_count": len(docs),
+        "child_page_ids": [doc.metadata["page_id"] for doc in docs],
+    }
+
+
+def _referenced_database_state_from_pages(page: dict, child_pages: List[dict]) -> dict:
+    return {
+        "type": "referenced_database",
+        "last_edited_time": page.get("last_edited_time", ""),
+        "title": _page_title(page),
+        "url": page.get("url", ""),
+        "referenced_database_id": _database_id_from_page_url(page),
+        "children_count": len(child_pages),
+        "child_page_ids": [child["id"] for child in child_pages],
+    }
+
+
+def _write_last_exported_pages_report(exported_pages: List[dict]) -> None:
+    EXPORT_PATH.mkdir(parents=True, exist_ok=True)
+    LAST_EXPORTED_PAGES_REPORT.write_text(
+        json.dumps(exported_pages, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _load_sync_state() -> dict:
+    if not SYNC_STATE_PATH.exists():
+        return {"pages": {}}
+
+    return json.loads(SYNC_STATE_PATH.read_text(encoding="utf-8"))
+
+
+def _write_sync_state(sync_state: dict) -> None:
+    EXPORT_PATH.mkdir(parents=True, exist_ok=True)
+    SYNC_STATE_PATH.write_text(
+        json.dumps(sync_state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _page_needs_sync(page: dict, sync_state: dict) -> tuple[bool, str]:
+    page_id = page["id"]
+    previous = sync_state.get("pages", {}).get(page_id)
+    if not previous:
+        return True, "new"
+
+    if previous.get("type") == "referenced_database":
+        child_page_ids = previous.get("child_page_ids", [])
+        missing_children = [
+            child_page_id
+            for child_page_id in child_page_ids
+            if child_page_id not in sync_state.get("pages", {})
+        ]
+        if missing_children:
+            return True, "updated"
+
+    if previous.get("last_edited_time") != page.get("last_edited_time", ""):
+        return True, "updated"
+
+    return False, "unchanged"
+
+
+def _update_page_state(sync_state: dict, doc: Document) -> None:
+    sync_state.setdefault("pages", {})[doc.metadata["page_id"]] = {
+        "last_edited_time": doc.metadata.get("last_edited_time", ""),
+        "title": doc.metadata.get("title", ""),
+        "url": doc.metadata.get("url", ""),
+        "export_file": doc.metadata.get("export_file", ""),
+    }
+
+
+def _removed_page_ids(sync_state: dict, reachable_page_ids: set[str]) -> List[str]:
+    if _env_int("NOTION_MAX_PAGES"):
+        return []
+
+    known_page_ids = set(sync_state.get("pages", {}))
+    return sorted(known_page_ids - reachable_page_ids)
+
+
 def _export_page_markdown(
     notion: Client,
     page: dict,
@@ -197,8 +311,8 @@ def _export_page_markdown(
     converter = BlockConvertor(Config(block_id=page_id), sanitized_client)
     try:
         markdown = converter.to_string(sanitized_client.get_children(page_id))
-    except APIResponseError as e:
-        print(f"No se pudo exportar como pagina: {title} ({page_id}) - {e.code}")
+    except (APIResponseError, RequestTimeoutError) as e:
+        print(f"No se pudo exportar como pagina: {title} ({page_id}) - {_error_code(e)}")
         raise
     markdown = markdown.strip()
 
@@ -225,24 +339,42 @@ def _export_referenced_database_pages(
     notion: Client,
     page: dict,
     skipped_pages: List[dict],
-) -> List[Document]:
+    sync_state: dict,
+    exported_pages: List[dict],
+    reachable_page_ids: set[str],
+) -> Optional[List[Document]]:
     referenced_database_id = _database_id_from_page_url(page)
     if not referenced_database_id:
-        return []
+        return None
 
     title = _page_title(page)
     try:
         nested_pages = list(_database_pages(notion, referenced_database_id))
-    except APIResponseError as e:
-        print(f"No se pudo expandir como database: {title} - {e.code}")
-        return []
+    except (APIResponseError, RequestTimeoutError) as e:
+        print(f"No se pudo expandir como database: {title} - {_error_code(e)}")
+        return None
 
     print(f"Expandiendo database referenciada: {title} ({len(nested_pages)} paginas)")
+    for nested_page in nested_pages:
+        reachable_page_ids.add(nested_page["id"])
+
+    sync_state.setdefault("pages", {})[page["id"]] = _referenced_database_state_from_pages(
+        page,
+        nested_pages,
+    )
+
     docs = []
     for nested_page in nested_pages:
+        needs_sync, sync_reason = _page_needs_sync(nested_page, sync_state)
+        if not needs_sync:
+            continue
+
         try:
-            docs.append(_export_page_markdown(notion, nested_page))
-        except APIResponseError as e:
+            doc = _export_page_markdown(notion, nested_page)
+            docs.append(doc)
+            exported_pages.append(_exported_page_info(doc, sync_reason))
+            _update_page_state(sync_state, doc)
+        except (APIResponseError, RequestTimeoutError) as e:
             skipped_pages.append(_skipped_page_info(nested_page, e))
 
     return [doc for doc in docs if doc is not None]
@@ -291,29 +423,115 @@ def sync_notion_to_chroma() -> None:
     if not pages:
         raise RuntimeError("Configura NOTION_PAGE_ID o NOTION_DATABASE_ID en .env")
 
+    sync_state = _load_sync_state()
     docs = []
     skipped_pages = []
+    exported_pages = []
+    reachable_page_ids = {page["id"] for page in pages}
     for page in pages:
-        try:
-            docs.append(_export_page_markdown(notion, page))
-        except APIResponseError as e:
-            database_docs = _export_referenced_database_pages(notion, page, skipped_pages)
-            if database_docs:
+        previous = sync_state.get("pages", {}).get(page["id"], {})
+        if previous.get("type") == "referenced_database":
+            reachable_page_ids.update(previous.get("child_page_ids", []))
+
+    new_pages = 0
+    updated_pages = 0
+    unchanged_pages = 0
+    for page in pages:
+        needs_sync, sync_reason = _page_needs_sync(page, sync_state)
+        previous = sync_state.get("pages", {}).get(page["id"], {})
+
+        if previous.get("type") == "referenced_database":
+            before_exported_count = len(exported_pages)
+            database_docs = _export_referenced_database_pages(
+                notion,
+                page,
+                skipped_pages,
+                sync_state,
+                exported_pages,
+                reachable_page_ids,
+            )
+            if database_docs is not None:
                 docs.extend(database_docs)
+                for doc in database_docs:
+                    reachable_page_ids.add(doc.metadata["page_id"])
+
+                new_exported_pages = exported_pages[before_exported_count:]
+                new_pages += sum(1 for item in new_exported_pages if item["status"] == "new")
+                updated_pages += sum(1 for item in new_exported_pages if item["status"] == "upd")
+                unchanged_pages += 1
+                continue
+
+        if not needs_sync:
+            unchanged_pages += 1
+            continue
+
+        if sync_reason == "new":
+            new_pages += 1
+        else:
+            updated_pages += 1
+
+        try:
+            doc = _export_page_markdown(notion, page)
+            docs.append(doc)
+            exported_pages.append(_exported_page_info(doc, sync_reason))
+            _update_page_state(sync_state, doc)
+        except (APIResponseError, RequestTimeoutError) as e:
+            database_docs = _export_referenced_database_pages(
+                notion,
+                page,
+                skipped_pages,
+                sync_state,
+                exported_pages,
+                reachable_page_ids,
+            )
+            if database_docs is not None:
+                docs.extend(database_docs)
+                for doc in database_docs:
+                    reachable_page_ids.add(doc.metadata["page_id"])
             else:
                 skipped_pages.append(_skipped_page_info(page, e))
 
-    if not docs:
-        raise RuntimeError("No se pudo exportar ninguna pagina accesible desde Notion")
     _write_skipped_pages_report(skipped_pages)
-    chunks = _split_notion_documents(docs)
+    _write_last_exported_pages_report(exported_pages)
+    removed_page_ids = _removed_page_ids(sync_state, reachable_page_ids)
+
+    if not docs and not removed_page_ids:
+        _write_sync_state(sync_state)
+        print(f"Paginas detectadas: {len(pages)}")
+        print(f"Paginas nuevas: {new_pages}")
+        print(f"Paginas actualizadas: {updated_pages}")
+        print(f"Paginas sin cambios: {unchanged_pages}")
+        print(f"Paginas saltadas: {len(skipped_pages)}")
+        print("Paginas eliminadas: 0")
+        print(f"Reporte de paginas exportadas: {LAST_EXPORTED_PAGES_REPORT}")
+        print("No hay paginas nuevas o modificadas para cargar en Chroma")
+        return
 
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vector_db = Chroma(persist_directory=DB_PATH, embedding_function=embeddings)
 
-    # Replace existing chunks for these pages so the demo is rerunnable.
-    for page in pages:
-        vector_db.delete(where={"page_id": page["id"]})
+    for page_id in removed_page_ids:
+        vector_db.delete(where={"page_id": page_id})
+        sync_state.get("pages", {}).pop(page_id, None)
+
+    _write_sync_state(sync_state)
+
+    if not docs:
+        print(f"Paginas detectadas: {len(pages)}")
+        print(f"Paginas nuevas: {new_pages}")
+        print(f"Paginas actualizadas: {updated_pages}")
+        print(f"Paginas sin cambios: {unchanged_pages}")
+        print(f"Paginas saltadas: {len(skipped_pages)}")
+        print(f"Paginas eliminadas: {len(removed_page_ids)}")
+        print(f"Reporte de paginas exportadas: {LAST_EXPORTED_PAGES_REPORT}")
+        print("No hay paginas nuevas o modificadas para cargar en Chroma")
+        return
+
+    chunks = _split_notion_documents(docs)
+
+    # Replace only changed pages; unchanged pages stay in Chroma.
+    for doc in docs:
+        vector_db.delete(where={"page_id": doc.metadata["page_id"]})
 
     ids = [
         f"notion:{chunk.metadata['page_id']}:{index}"
@@ -321,9 +539,15 @@ def sync_notion_to_chroma() -> None:
     ]
     vector_db.add_documents(chunks, ids=ids)
 
+    print(f"Paginas detectadas: {len(pages)}")
+    print(f"Paginas nuevas: {new_pages}")
+    print(f"Paginas actualizadas: {updated_pages}")
+    print(f"Paginas sin cambios: {unchanged_pages}")
     print(f"Paginas exportadas: {len(docs)}")
     print(f"Paginas saltadas: {len(skipped_pages)}")
+    print(f"Paginas eliminadas: {len(removed_page_ids)}")
     print(f"Reporte de paginas saltadas: {SKIPPED_PAGES_REPORT}")
+    print(f"Reporte de paginas exportadas: {LAST_EXPORTED_PAGES_REPORT}")
     print(f"Chunks cargados en Chroma: {len(chunks)}")
     print("Chunking: secciones Markdown con fallback por tamano")
     print(f"Markdown generado en: {EXPORT_PATH}")
