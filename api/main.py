@@ -9,14 +9,12 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# Rutas absolutas
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 sys.path.append(BASE_DIR)
 
 from src.rag_engine import RagEngine
 
-# Estado global
 engine = None
 
 @asynccontextmanager
@@ -66,7 +64,7 @@ async def generate_roadmap_endpoint(request: QueryRequest):
     return engine.generate_roadmap(request.question)
 
 
-# ── Laboratorio de evaluación paso a paso ─────────────────────────────────────
+# Laboratorio de evaluacion paso a paso
 
 class PipelineRequest(BaseModel):
     question:       str
@@ -92,16 +90,13 @@ def _roadmap_to_text(roadmap: dict) -> str:
 
 @app.post("/eval/pipeline")
 async def eval_pipeline(req: PipelineRequest):
-    """
-    Corre el pipeline RAG paso a paso para UNA consulta, devolviendo cada etapa
-    con lo que hace y su resultado — para visualización educativa.
-    """
+    """Corre el pipeline RAG paso a paso para una consulta, devolviendo cada etapa."""
     if not engine:
         raise HTTPException(status_code=503, detail="Motor no iniciado.")
 
     steps = []
 
-    # ── Paso 1: Reescritura de consulta ───────────────────────────────────────
+    # Paso 1: reescritura de consulta
     t0 = time.time()
     refined = engine.rewrite_query(req.question)
     steps.append({
@@ -113,7 +108,7 @@ async def eval_pipeline(req: PipelineRequest):
         "elapsed_s": round(time.time() - t0, 2),
     })
 
-    # ── Paso 2: Recuperacion + Re-ranking ─────────────────────────────────────
+    # Paso 2: recuperacion + re-ranking
     t0 = time.time()
     method = req.rerank_method if req.rerank else "none"
     retr = engine.retrieve_contexts_scored(refined, method=method)
@@ -134,7 +129,7 @@ async def eval_pipeline(req: PipelineRequest):
         "elapsed_s": round(time.time() - t0, 2),
     })
 
-    # ── Paso 3: Generacion del roadmap ────────────────────────────────────────
+    # Paso 3: generacion del roadmap
     t0 = time.time()
     contexts = [c["text"] for c in retr["selected"]]
     roadmap  = engine.build_roadmap(req.question, refined, contexts)
@@ -148,7 +143,7 @@ async def eval_pipeline(req: PipelineRequest):
         "elapsed_s": round(time.time() - t0, 2),
     })
 
-    # ── Paso 4: Validacion de estructura (deterministica) ─────────────────────
+    # Paso 4: validacion de estructura (deterministica)
     if req.run_structure:
         t0 = time.time()
         from evaluation.structure_validator import StructureValidator
@@ -162,7 +157,7 @@ async def eval_pipeline(req: PipelineRequest):
             "elapsed_s": round(time.time() - t0, 2),
         })
 
-    # ── Paso 5: Similitud query-respuesta (cap. 2 Rothman) ────────────────────
+    # Paso 5: similitud query-respuesta
     if req.run_similarity:
         t0 = time.time()
         from evaluation.similarity_metrics import query_answer_relevance
@@ -176,7 +171,7 @@ async def eval_pipeline(req: PipelineRequest):
             "elapsed_s": round(time.time() - t0, 2),
         })
 
-    # ── Paso 6: LLM Judge (opcional, mas lento) ───────────────────────────────
+    # Paso 6: LLM judge (opcional, mas lento)
     if req.run_judge:
         t0 = time.time()
         from evaluation.llm_judge import LLMJudgeEvaluator

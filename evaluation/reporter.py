@@ -1,9 +1,4 @@
-"""
-reporter.py — Genera 3 salidas:
-  1. eval_report.json  — datos completos raw
-  2. eval_report.html  — reporte visual con tabla para revisión humana
-  3. human_review.csv  — tabla input/output para que el humano llene su nota
-"""
+"""Genera las salidas de evaluación: eval_report.json, eval_report.html y human_review.csv."""
 
 import os
 import json
@@ -13,8 +8,6 @@ from datetime import datetime
 from evaluation.config import config
 
 
-# ── JSON ───────────────────────────────────────────────────────────────────────
-
 def save_json(data: dict, path: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -22,14 +15,8 @@ def save_json(data: dict, path: str):
     print(f"  JSON guardado: {path}")
 
 
-# ── CSV para revisión humana ───────────────────────────────────────────────────
-
 def save_human_review_csv(judge_results: dict, path: str):
-    """
-    Tabla que el humano llena offline.
-    Columnas: Pregunta | Pasos generados | Score MESE | Score Secuencia |
-              ¿Orden válido? | Nota Humana (0-10) | Comentarios | ¿Aprobar?
-    """
+    """Tabla que el humano llena offline con sus notas y comentarios."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
@@ -40,7 +27,7 @@ def save_human_review_csv(judge_results: dict, path: str):
             "Pasos esperados",
             "Score MESE", "Score Secuencia", "Secuencia válida (IA)",
             "Pasos fuera de orden (IA)", "Sugerencia de reorden (IA)",
-            # ── columnas para el humano ──
+            # columnas para el humano
             "Nota Humana Secuencia (0-10)", "Nota Humana General (0-10)",
             "¿Aprobar? (Si/No)", "Comentarios del Revisor",
         ])
@@ -70,8 +57,6 @@ def save_human_review_csv(judge_results: dict, path: str):
     print(f"  CSV revisión humana: {path}")
 
 
-# ── HTML ───────────────────────────────────────────────────────────────────────
-
 def _score_color(score: float) -> str:
     if score >= 7:  return "#52c41a"
     if score >= 5:  return "#fa8c16"
@@ -99,7 +84,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
     pass_rate  = judge_results.get("pass_rate", 0)    if judge_results  else 0
     mese_rate  = judge_results.get("mese_pass_rate", 0) if judge_results else 0
 
-    # ── Tarjetas resumen ──
+    # tarjetas resumen
     summary_cards = ""
     all_cards = []
     if judge_agg:
@@ -121,7 +106,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
           {_bar(val)}
         </div>'''
 
-    # ── Tabla RAGAS ──
+    # tabla RAGAS
     ragas_rows = ""
     for s in (ragas_results or {}).get("per_sample", []):
         sc = s.get("scores", {})
@@ -138,7 +123,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
             {sc.get("context_recall",0):.2f}</td>
         </tr>'''
 
-    # ── Tabla humana (LLM Judge + revisión) ──
+    # tabla humana (LLM Judge + revision)
     human_rows = ""
     for i, s in enumerate((judge_results or {}).get("per_sample", []), 1):
         seq    = s["sequence_eval"]
@@ -237,7 +222,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
           </td>
         </tr>'''
 
-    # ── Sección Corpus Judge ──────────────────────────────────────────────────
+    # seccion Corpus Judge
     corpus_section = ""
     if corpus_results and "overall_corpus_score" in corpus_results:
         ca   = corpus_results.get("aggregated", {})
@@ -370,7 +355,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
 </head>
 <body>
 
-<h1>📊 NotionMap — Reporte de Evaluación</h1>
+<h1>NotionMap — Reporte de Evaluación</h1>
 <div class="meta">Generado: {now} &nbsp;|&nbsp; Modelo: {config.bedrock_model_id}</div>
 
 <!-- Tarjetas resumen -->
@@ -414,7 +399,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
       <th>MESE</th>
       <th>Estructura</th>
       <th>Score General</th>
-      <th style="background:#fffbe6">✏️ Revisión Humana</th>
+      <th style="background:#fffbe6">Revisión Humana</th>
     </tr>
   </thead>
   <tbody>{human_rows}</tbody>

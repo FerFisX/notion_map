@@ -1,13 +1,4 @@
-"""
-neo4j_loader.py
-───────────────
-Extrae nodos y relaciones de Neo4j y los convierte en
-documentos LangChain para alimentar ChromaDB.
-
-Uso desde ingest.py:
-    from src.neo4j_loader import load_from_neo4j
-    docs = load_from_neo4j()
-"""
+"""Extrae nodos y relaciones de Neo4j como documentos LangChain para ChromaDB."""
 
 import os
 from dotenv import load_dotenv
@@ -36,27 +27,20 @@ def _get_driver():
 
     driver = GraphDatabase.driver(uri, auth=(user, password))
     driver.verify_connectivity()
-    print(f"  ✅ Neo4j conectado → {uri} / db:{database}")
+    print(f"  Neo4j conectado: {uri} / db:{database}")
     return driver, database
 
 
 def load_from_neo4j(limit: int = 1000) -> list[Document]:
     """
-    Extrae todos los nodos de Neo4j como documentos de texto.
-
-    Cada nodo se convierte en un Document con:
-      - page_content: texto con labels + propiedades
-      - metadata: {source, node_id, labels}
-
-    Returns:
-        Lista de Document listos para ChromaDB.
+    Extrae todos los nodos de Neo4j como documentos de texto para ChromaDB.
     """
     driver, database = _get_driver()
     docs = []
 
     with driver.session(database=database) as session:
 
-        # ── 1. Nodos ─────────────────────────────────────────────────
+        # nodos
         print("  Extrayendo nodos...")
         result = session.run(f"""
             MATCH (n)
@@ -72,7 +56,6 @@ def load_from_neo4j(limit: int = 1000) -> list[Document]:
             props   = record["props"]
             node_id = record["node_id"]
 
-            # Convertir el nodo a texto legible
             lines = [f"Entidad: {', '.join(labels)}"]
             for key, value in props.items():
                 if value is not None and str(value).strip():
@@ -88,7 +71,7 @@ def load_from_neo4j(limit: int = 1000) -> list[Document]:
                 }
             ))
 
-        # ── 2. Relaciones (como contexto adicional) ───────────────────
+        # relaciones
         print("  Extrayendo relaciones...")
         result = session.run(f"""
             MATCH (a)-[r]->(b)
@@ -126,7 +109,7 @@ def load_from_neo4j(limit: int = 1000) -> list[Document]:
             ))
 
     driver.close()
-    print(f"  📦 Neo4j: {len(docs)} documentos extraídos")
+    print(f"  Neo4j: {len(docs)} documentos extraídos")
     return docs
 
 

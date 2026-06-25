@@ -1,7 +1,4 @@
-"""
-config.py — Configuración centralizada del sistema de evaluación.
-Cambia aquí pesos, modelos y umbrales sin tocar el resto del código.
-"""
+"""Configuración centralizada del sistema de evaluación: pesos, modelos y umbrales."""
 
 import os
 from dataclasses import dataclass, field
@@ -14,7 +11,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 @dataclass
 class EvalConfig:
-    # ── LLM ───────────────────────────────────────────────────────────────
+    # LLM
     bedrock_model_id: str = field(
         default_factory=lambda: os.getenv(
             "BEDROCK_MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0"
@@ -25,7 +22,7 @@ class EvalConfig:
     )
     judge_temperature: float = 0.0
 
-    # ── RAGAS ─────────────────────────────────────────────────────────────
+    # RAGAS
     ragas_metrics: List[str] = field(default_factory=lambda: [
         "faithfulness",
         "answer_relevancy",
@@ -33,7 +30,7 @@ class EvalConfig:
         "context_recall",
     ])
 
-    # ── LLM Judge — criterios clásicos (0-10) ─────────────────────────────
+    # LLM Judge: criterios clasicos (0-10)
     judge_criteria: List[str] = field(default_factory=lambda: [
         "faithfulness",
         "relevance",
@@ -42,14 +39,7 @@ class EvalConfig:
         "technical_accuracy",
     ])
 
-    # ── MESE — Mutually Exclusive, Simultaneously Exhaustive ──────────────
-    # M = Mapping        | precisión factual de cada paso vs contexto
-    # E = Exhaustiveness | cobertura: ¿falta algún paso importante?
-    # S = Sequence       | orden lógico y dependencias causales  ← mayor peso
-    # E = Experience     | claridad y usabilidad para el usuario final
-    #
-    # Son mutuamente exclusivos: cada uno falla de forma independiente
-    # Son simultáneamente exhaustivos: juntos cubren toda la calidad del roadmap
+    # MESE: Mapping, Exhaustiveness, Sequence (mayor peso), Experience
     mese_weights: dict = field(default_factory=lambda: {
         "mapping":        0.25,
         "exhaustiveness": 0.20,
@@ -57,12 +47,12 @@ class EvalConfig:
         "experience":     0.20,
     })
 
-    # ── Umbrales ──────────────────────────────────────────────────────────
+    # Umbrales
     pass_threshold:      float = 6.0
     mese_pass_threshold: float = 6.0
     sequence_min_score:  float = 5.0
 
-    # ── Rutas ─────────────────────────────────────────────────────────────
+    # Rutas
     reports_dir:     str = os.path.join(BASE_DIR, "evaluation", "reports")
     vectorstore_dir: str = os.path.join(BASE_DIR, "vectorstore", "chroma_db")
 

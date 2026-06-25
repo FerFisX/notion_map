@@ -1,19 +1,6 @@
 """
-similarity_metrics.py — Métricas de similitud query↔respuesta.
-
-Basado en Rothman (2024), cap. 1-2:
-  "Evaluating the output with cosine similarity"
-
-Implementa DOS formas que el libro contrasta directamente:
-  1. TF-IDF cosine          — basado en frecuencia de palabras (rápido, superficial)
-  2. Sentence-Transformer   — basado en embeddings semánticos (capta significado)
-
-El libro muestra que para la misma consulta:
-  TF-IDF              -> ~0.13  (no entiende sinónimos ni contexto)
-  Sentence-Transformer -> ~0.74  (capta relación semántica real)
-
-Sirve como métrica AUTOMÁTICA sin necesidad de ground truth:
-mide cuánto se relaciona la respuesta generada con la pregunta del usuario.
+Métricas de similitud query-respuesta: TF-IDF cosine y Sentence-Transformer.
+Métrica automática que no necesita ground truth. Ref: Rothman (2024), cap. 1-2.
 """
 
 from __future__ import annotations
@@ -32,14 +19,8 @@ def _get_st_model():
     return _st_model
 
 
-# ── 1. TF-IDF cosine (baseline del libro) ─────────────────────────────────────
-
 def tfidf_cosine(text_a: str, text_b: str) -> float:
-    """
-    Similitud coseno basada en TF-IDF.
-    Mide solapamiento de palabras, NO significado.
-    Retorna 0.0 - 1.0
-    """
+    """Similitud coseno basada en TF-IDF (solapamiento de palabras). Retorna 0.0-1.0."""
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
 
@@ -55,14 +36,8 @@ def tfidf_cosine(text_a: str, text_b: str) -> float:
         return 0.0
 
 
-# ── 2. Sentence-Transformer cosine (semántico) ────────────────────────────────
-
 def semantic_cosine(text_a: str, text_b: str) -> float:
-    """
-    Similitud coseno basada en embeddings semánticos (all-MiniLM-L6-v2).
-    Capta significado, sinónimos y contexto.
-    Retorna 0.0 - 1.0
-    """
+    """Similitud coseno con embeddings semánticos (all-MiniLM-L6-v2). Retorna 0.0-1.0."""
     from sklearn.metrics.pairwise import cosine_similarity
 
     if not text_a.strip() or not text_b.strip():
@@ -76,22 +51,8 @@ def semantic_cosine(text_a: str, text_b: str) -> float:
     return round(float(sim[0][0]), 4)
 
 
-# ── Métrica combinada query↔respuesta ─────────────────────────────────────────
-
 def query_answer_relevance(question: str, answer: str) -> dict:
-    """
-    Evalúa qué tan relacionada está la RESPUESTA generada con la PREGUNTA.
-    Métrica automática (no necesita ground truth).
-
-    Returns:
-        {
-          "tfidf":           float 0-1,   # baseline superficial
-          "semantic":        float 0-1,   # semántico (el que importa)
-          "semantic_0_10":   float 0-10,  # escalado para combinar con otras métricas
-          "gain":            float,        # cuánto mejora semantic vs tfidf
-          "interpretation":  str,
-        }
-    """
+    """Evalúa qué tan relacionada está la respuesta generada con la pregunta."""
     tf = tfidf_cosine(question, answer)
     se = semantic_cosine(question, answer)
 

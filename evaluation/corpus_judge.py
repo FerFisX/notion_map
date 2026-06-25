@@ -1,19 +1,6 @@
 """
-corpus_judge.py — Evalúa la calidad de los documentos en el knowledge base.
-
-Inspirado en Rothman (2024), cap. 1-3:
-  - El evaluador (E) debe medir calidad del corpus, no solo del output
-  - Cosine similarity semántica para detectar redundancia entre chunks
-  - LLM como juez de coherencia, densidad técnica y utilidad de cada chunk
-  - Trazabilidad: ¿el chunk es suficientemente informativo para generar respuestas?
-
-Métricas:
-  chunk_quality_score     — promedio de calidad de chunks (0-10, via LLM)
-  semantic_diversity      — qué tan variados son los chunks (1 = total redundancia)
-  avg_chunk_length        — longitud promedio (muy corto = poco informativo)
-  redundancy_pairs        — pares de chunks con similitud > 0.85
-  coverage_breadth        — temas únicos estimados (via LLM)
-  overall_corpus_score    — score combinado 0-10
+Evalúa la calidad del knowledge base: calidad de cada chunk (LLM), diversidad
+semántica entre chunks (cosine similarity) y cobertura temática. Ref: Rothman (2024).
 """
 
 from __future__ import annotations
@@ -28,8 +15,6 @@ sys.path.insert(0, BASE_DIR)
 from evaluation.config import config
 from src.llm_provider import get_llm, active_model_name
 
-
-# ── Prompt para evaluar un chunk individual ───────────────────────────────────
 
 _CHUNK_EVAL_PROMPT = """\
 Eres un experto en sistemas RAG. Evalúa el siguiente fragmento de texto
@@ -61,8 +46,6 @@ Responde SOLO con JSON válido, sin markdown:
 }}
 """
 
-# ── Prompt para estimar cobertura temática global ────────────────────────────
-
 _COVERAGE_PROMPT = """\
 Eres un experto en sistemas RAG. Tienes los siguientes temas principales
 extraídos de los fragmentos de la base de conocimiento:
@@ -91,8 +74,6 @@ class CorpusJudge:
 
     def __init__(self):
         self.llm = get_llm(temperature=0.0, max_tokens=512)
-
-    # ── Evalúa un chunk con el LLM ────────────────────────────────────────────
 
     def _eval_chunk(self, chunk: str, idx: int, total: int) -> dict:
         print(f"    [{idx}/{total}] evaluando chunk ({len(chunk)} chars)...")
@@ -123,15 +104,9 @@ class CorpusJudge:
                 "chunk_length": len(chunk),
             }
 
-    # ── Calcula diversidad semántica entre chunks ─────────────────────────────
-
     @staticmethod
     def _semantic_diversity(chunks: list[str]) -> dict:
-        """
-        Basado en Rothman cap 2: cosine similarity con sentence transformers
-        para medir redundancia entre chunks.
-        Retorna: diversidad promedio (0=idénticos, 1=completamente distintos)
-        """
+        """Diversidad por cosine similarity entre chunks (0=idénticos, 1=distintos)."""
         try:
             from sentence_transformers import SentenceTransformer
             from sklearn.metrics.pairwise import cosine_similarity
@@ -175,8 +150,6 @@ class CorpusJudge:
                 "error": "sentence-transformers no disponible",
             }
 
-    # ── Evalúa cobertura temática global ─────────────────────────────────────
-
     def _eval_coverage(self, topics: list[str]) -> dict:
         topics_str = "\n".join(f"  - {t}" for t in topics)
         try:
@@ -191,19 +164,8 @@ class CorpusJudge:
         except Exception as e:
             return {"error": str(e)}
 
-    # ── Punto de entrada principal ────────────────────────────────────────────
-
     def evaluate(self, chunks: list[str], max_chunks: int = 20) -> dict:
-        """
-        Evalúa la calidad del knowledge base.
-
-        Args:
-            chunks:     lista de textos crudos extraídos de ChromaDB
-            max_chunks: máximo de chunks a evaluar con LLM (por costo)
-
-        Returns:
-            diccionario completo de métricas del corpus
-        """
+        """Evalúa la calidad del knowledge base sobre hasta max_chunks fragmentos."""
         if not chunks:
             return {"error": "No hay chunks en el vectorstore."}
 
@@ -211,19 +173,15 @@ class CorpusJudge:
         total  = len(sample)
         print(f"\n  [Corpus Judge] Evaluando {total} chunks con {active_model_name()}...")
 
-        # 1. Evaluar cada chunk con LLM
         chunk_results = [self._eval_chunk(c, i + 1, total) for i, c in enumerate(sample)]
 
-        # 2. Diversidad semántica (cosine similarity)
         print("  [Corpus Judge] Calculando diversidad semántica...")
         diversity = self._semantic_diversity(sample)
 
-        # 3. Cobertura temática
         topics = [r.get("tema_principal", "desconocido") for r in chunk_results]
         print("  [Corpus Judge] Evaluando cobertura temática...")
         coverage = self._eval_coverage(topics)
 
-        # 4. Estadísticas agregadas
         scores_coh  = [r.get("coherencia", 0)       for r in chunk_results]
         scores_den  = [r.get("densidad_tecnica", 0)  for r in chunk_results]
         scores_rag  = [r.get("utilidad_rag", 0)      for r in chunk_results]
@@ -235,10 +193,9 @@ class CorpusJudge:
         avg_length   = round(sum(lengths)    / len(lengths),    0) if lengths    else 0
         div_score    = diversity.get("diversity_score") or 0
 
-        # Score global del corpus (ponderado)
         corpus_score = round(
-            avg_quality       * 0.50 +   # calidad media de chunks
-            div_score * 10    * 0.25 +   # diversidad semántica (escala 0-1 → 0-10)
+            avg_quality       * 0.50 +
+            div_score * 10    * 0.25 +
             coverage.get("profundidad", 5) * 0.15 +
             coverage.get("amplitud",    5) * 0.10,
             2
@@ -269,16 +226,8 @@ class CorpusJudge:
         }
 
 
-# ── Función de conveniencia ───────────────────────────────────────────────────
-
 def run_corpus_judge(vectorstore_path: str = None, max_chunks: int = 20) -> dict:
-    """
-    Carga los chunks desde ChromaDB y los evalúa.
-
-    Args:
-        vectorstore_path: ruta al directorio de ChromaDB (default: vectorstore/chroma_db)
-        max_chunks:       máximo de chunks a evaluar (limitar por costo)
-    """
+    """Carga los chunks desde ChromaDB y los evalúa."""
     import os
     from langchain_chroma import Chroma
     from langchain_huggingface import HuggingFaceEmbeddings

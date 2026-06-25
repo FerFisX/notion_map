@@ -1,5 +1,5 @@
 """
-ragas_evaluator.py — Evaluación automática con el framework RAGAS.
+Evaluación automática con RAGAS.
 Métricas: faithfulness, answer_relevancy, context_precision, context_recall.
 """
 
@@ -14,15 +14,7 @@ from src.llm_provider import get_llm
 
 
 def run_ragas(adapter: RagAdapter, samples: List[EvalSample]) -> dict:
-    """
-    Corre las 4 métricas RAGAS sobre todas las muestras.
-
-    Returns:
-        {
-            "per_sample": [ { "question", "scores": {...} } ],
-            "aggregated": { metric: { mean, std, min, max } },
-        }
-    """
+    """Corre las 4 métricas RAGAS sobre todas las muestras."""
     try:
         from ragas import evaluate
         from ragas.metrics import (
@@ -82,7 +74,7 @@ def run_ragas(adapter: RagAdapter, samples: List[EvalSample]) -> dict:
             "contexts": raw_results[i]["contexts"],
         })
 
-    # Estadísticas agregadas
+    # estadísticas agregadas
     aggregated = {}
     for m in metric_names:
         vals = [s["scores"][m] for s in per_sample if m in s["scores"]]

@@ -93,8 +93,8 @@
 </head>
 <body>
 
-<h1>🧪 Laboratorio de Evaluación — NotionMap</h1>
-<div class="sub">Ejecuta el pipeline RAG paso a paso. Elige qué pruebas correr y observa cómo cada etapa mejora la respuesta. &nbsp;|&nbsp; <a href="/">← volver a la app</a></div>
+<h1>Laboratorio de Evaluación — NotionMap</h1>
+<div class="sub">Ejecuta el pipeline RAG paso a paso. Elige qué pruebas correr y observa cómo cada etapa mejora la respuesta. &nbsp;|&nbsp; <a href="/">volver a la app</a></div>
 
 <div class="controls">
   <textarea id="question" placeholder="Escribe una consulta, ej: ¿cómo crear una base de datos relacional?">¿Cómo identificar una llave candidata en una base de datos?</textarea>
@@ -107,11 +107,11 @@
       <option value="none">Sin re-ranking</option>
     </select>
     <label class="opt"><input type="checkbox" id="structure" checked> Validar estructura</label>
-    <label class="opt"><input type="checkbox" id="similarity" checked> Similitud query↔respuesta</label>
+    <label class="opt"><input type="checkbox" id="similarity" checked> Similitud query-respuesta</label>
     <label class="opt"><input type="checkbox" id="judge"> LLM Judge (lento)</label>
   </div>
 
-  <button class="run-btn" id="run" onclick="run()">▶ Ejecutar pipeline</button>
+  <button class="run-btn" id="run" onclick="run()">Ejecutar pipeline</button>
 </div>
 
 <div id="output"><div class="empty">Configura las opciones y pulsa <b>Ejecutar pipeline</b>.</div></div>
@@ -153,7 +153,7 @@ async function run() {
     $('output').innerHTML = '<div class="empty fail">Error: ' + esc(e.message) + '</div>';
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '▶ Ejecutar pipeline';
+    btn.innerHTML = 'Ejecutar pipeline';
   }
 }
 
@@ -167,7 +167,7 @@ function render(data) {
     div.innerHTML = `
       <div class="step-head" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display==='none'?'block':'none'">
         <h3>${esc(s.title)}</h3>
-        <span class="chip">⏱ ${s.elapsed_s}s</span>
+        <span class="chip">${s.elapsed_s}s</span>
       </div>
       <div class="step-body">
         <div class="meta-row">

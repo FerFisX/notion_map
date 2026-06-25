@@ -1,18 +1,5 @@
-"""
-llm_provider.py — Fábrica central de LLM.
+"""Fábrica central de LLM. El proveedor se elige con LLM_PROVIDER en el .env."""
 
-Para cambiar de proveedor edita SOLO el .env:
-  LLM_PROVIDER=bedrock    → AWS Bedrock  (usa BEDROCK_MODEL_ID + credenciales AWS)
-  LLM_PROVIDER=anthropic  → Anthropic API directa (usa ANTHROPIC_API_KEY)
-  LLM_PROVIDER=openai     → OpenAI (usa OPENAI_API_KEY)
-  LLM_PROVIDER=gemini     → Google Gemini (usa GEMINI_API_KEY)
-  LLM_PROVIDER=ollama     → modelos locales (sin API key, gratis)
-
-Ningún otro archivo del proyecto importa ChatBedrock/ChatGoogleGenerativeAI directamente.
-"""
-
-# tool search validacion informacion por internet
-# infografia datos de entrada para el ragas
 import os
 
 _SUPPORTED = ("bedrock", "anthropic", "openai", "gemini", "ollama")

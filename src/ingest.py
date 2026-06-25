@@ -1,11 +1,4 @@
-"""
-ingest.py — Convierte PDFs a Markdown (via markitdown), luego los indexa en ChromaDB.
-
-Flujo:
-  1. data/*.pdf  →  markitdown  →  data/markdown/*.md  (conversión limpia con estructura)
-  2. data/markdown/*.md  →  chunks  →  ChromaDB (embeddings HuggingFace)
-  3. Neo4j (opcional) — se añade si hay credenciales en .env
-"""
+"""Convierte PDFs a Markdown con markitdown y los indexa en ChromaDB."""
 
 import os
 import sys
@@ -34,7 +27,7 @@ MARKDOWN_PATH = os.path.join(BASE_DIR, "data", "markdown")
 DB_PATH       = os.path.join(BASE_DIR, "vectorstore", "chroma_db")
 
 
-# ── Paso 1: PDF → Markdown ────────────────────────────────────────────────────
+# PDF a Markdown
 
 def convert_pdfs_to_markdown() -> list[str]:
     """
@@ -77,7 +70,7 @@ def convert_pdfs_to_markdown() -> list[str]:
     return md_paths
 
 
-# ── Paso 2: Markdown → LangChain Documents ────────────────────────────────────
+# Markdown a Documents de LangChain
 
 def load_markdown_docs(md_paths: list[str]) -> list[Document]:
     """
@@ -97,7 +90,7 @@ def load_markdown_docs(md_paths: list[str]) -> list[Document]:
     return docs
 
 
-# ── Fuente adicional: Neo4j ───────────────────────────────────────────────────
+# Fuente adicional: Neo4j
 
 def load_neo4j_docs() -> list:
     uri = os.getenv("NEO4J_URI", "")
@@ -129,7 +122,7 @@ def load_neo4j_docs() -> list:
         return []
 
 
-# ── ChromaDB: limpiar y recrear ───────────────────────────────────────────────
+# ChromaDB: limpiar y recrear
 
 def reset_vectorstore():
     if os.path.exists(DB_PATH):
@@ -143,23 +136,18 @@ def reset_vectorstore():
     os.makedirs(DB_PATH, exist_ok=True)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-
 def main():
     print("=" * 55)
     print("  NotionMap — Ingesta con Markdown (via markitdown)")
     print("=" * 55)
 
-    # 1. Convertir PDFs a Markdown
     print("\n[1/4] Convirtiendo PDFs a Markdown...")
     md_paths = convert_pdfs_to_markdown()
     print(f"       {len(md_paths)} archivos Markdown generados en data/markdown/")
 
-    # 2. Cargar los Markdown como Documents
     print("\n[2/4] Cargando Markdown como documentos...")
     md_docs = load_markdown_docs(md_paths)
 
-    # 3. Cargar Neo4j (opcional)
     print("\n[3/4] Cargando desde Neo4j (opcional)...")
     neo4j_docs = load_neo4j_docs()
 
@@ -169,7 +157,6 @@ def main():
         print("    Agrega PDFs en data/ o configura NEO4J_* en .env")
         return
 
-    # 4. Fragmentar y generar embeddings
     print(f"\n[4/4] Fragmentando y generando embeddings...")
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,

@@ -1,22 +1,6 @@
 """
-structure_validator.py — Validación determinística de la estructura del roadmap.
-
-Verifica FORMA, no contenido. No usa LLM.
-Cada check es pass/fail con peso; el score final es 0-10.
-
-Checks implementados:
-  step_count              — entre 6 y 12 pasos
-  has_title               — el roadmap tiene título
-  unique_ids              — todos los step.id son únicos
-  single_inicio           — exactamente un nodo tipo 'inicio'
-  single_fin              — exactamente un nodo tipo 'fin'
-  starts_with_inicio      — primer paso es 'inicio'
-  ends_with_fin           — último paso es 'fin'
-  valid_types             — todos los tipos son inicio/proceso/decision/fin
-  key_points_count        — cada paso tiene 3-5 key_points
-  label_action_verb       — cada label empieza con verbo de acción
-  description_min_length  — cada descripción tiene >= 2 oraciones y >= 60 chars
-  no_empty_fields         — ningún campo obligatorio está vacío
+Validación determinística de la estructura del roadmap (forma, no contenido).
+Cada check es pass/fail con peso; el score final es 0-10. No usa LLM.
 """
 
 from __future__ import annotations
@@ -67,22 +51,10 @@ class StructureValidator:
     PASS_THRESHOLD = 7.0  # score mínimo para PASS
 
     def validate(self, roadmap: dict) -> dict:
-        """
-        Returns:
-            {
-                "score":        float 0-10,
-                "verdict":      "PASS" | "FAIL",
-                "passed":       int,
-                "total_checks": int,
-                "pass_rate":    float 0-1,
-                "checks":       list[{name, passed, detail, weight}],
-                "violations":   list[str],    # solo los que fallaron
-            }
-        """
         steps: List[dict] = roadmap.get("steps", [])
         checks: List[_Check] = []
 
-        # ── 1. Cantidad de pasos (peso alto) ──────────────────────────────────
+        # cantidad de pasos
         n = len(steps)
         checks.append(_Check(
             "step_count", 6 <= n <= 12,
@@ -90,14 +62,14 @@ class StructureValidator:
             weight=1.5,
         ))
 
-        # ── 2. Título presente ────────────────────────────────────────────────
+        # título presente
         title = roadmap.get("title", "").strip()
         checks.append(_Check(
             "has_title", bool(title),
             f"Título: '{title[:60]}'" if title else "Sin título",
         ))
 
-        # ── 3. IDs únicos ─────────────────────────────────────────────────────
+        # IDs únicos
         ids = [s.get("id", "") for s in steps]
         dups = [id_ for id_ in set(ids) if ids.count(id_) > 1]
         checks.append(_Check(
@@ -105,7 +77,7 @@ class StructureValidator:
             "IDs únicos" if not dups else f"IDs duplicados: {dups}",
         ))
 
-        # ── 4. Exactamente un nodo 'inicio' ───────────────────────────────────
+        # exactamente un nodo 'inicio'
         inicio_n = sum(1 for s in steps if s.get("type") == "inicio")
         checks.append(_Check(
             "single_inicio", inicio_n == 1,
@@ -113,7 +85,7 @@ class StructureValidator:
             weight=1.2,
         ))
 
-        # ── 5. Exactamente un nodo 'fin' ──────────────────────────────────────
+        # exactamente un nodo 'fin'
         fin_n = sum(1 for s in steps if s.get("type") == "fin")
         checks.append(_Check(
             "single_fin", fin_n == 1,
@@ -121,7 +93,7 @@ class StructureValidator:
             weight=1.2,
         ))
 
-        # ── 6. Primer paso es 'inicio' ────────────────────────────────────────
+        # primer paso es 'inicio'
         if steps:
             first_type = steps[0].get("type", "")
             checks.append(_Check(
@@ -129,7 +101,7 @@ class StructureValidator:
                 f"Primer paso tipo '{first_type}' (debe ser 'inicio')",
             ))
 
-        # ── 7. Último paso es 'fin' ───────────────────────────────────────────
+        # último paso es 'fin'
         if steps:
             last_type = steps[-1].get("type", "")
             checks.append(_Check(
@@ -137,9 +109,9 @@ class StructureValidator:
                 f"Último paso tipo '{last_type}' (debe ser 'fin')",
             ))
 
-        # ── 8. Tipos válidos en todos los pasos ───────────────────────────────
+        # tipos válidos en todos los pasos
         bad_types = [
-            f"'{s.get('label','?')}' → tipo='{s.get('type')}'"
+            f"'{s.get('label','?')}' tipo='{s.get('type')}'"
             for s in steps
             if s.get("type") not in _VALID_TYPES
         ]
@@ -149,7 +121,7 @@ class StructureValidator:
                 else f"Tipos inválidos: {bad_types[:3]}",
         ))
 
-        # ── 9. key_points: entre 3 y 5 por paso (peso alto) ──────────────────
+        # key_points: entre 3 y 5 por paso
         kp_bad = [
             f"'{s.get('label','?')}': {len(s.get('key_points', []))} key_points"
             for s in steps
@@ -162,12 +134,11 @@ class StructureValidator:
             weight=1.5,
         ))
 
-        # ── 10. Label empieza con verbo de acción (peso medio) ────────────────
+        # label empieza con verbo de acción
         label_bad = []
         for s in steps:
             raw_label = s.get("label", "").strip()
             first = raw_label.lower().split()[0] if raw_label.split() else ""
-            # También aceptar si cualquier verbo conocido es prefijo de la primera palabra
             has_verb = first in _ACTION_VERBS or any(
                 first.startswith(v) for v in _ACTION_VERBS if len(v) >= 4
             )
@@ -180,7 +151,7 @@ class StructureValidator:
             weight=1.2,
         ))
 
-        # ── 11. Description >= 2 oraciones y >= 60 caracteres ─────────────────
+        # description >= 2 oraciones y >= 60 caracteres
         desc_bad = []
         for s in steps:
             desc = s.get("description", "")
@@ -196,7 +167,7 @@ class StructureValidator:
             weight=1.3,
         ))
 
-        # ── 12. Sin campos vacíos ─────────────────────────────────────────────
+        # sin campos vacíos
         empty_bad = []
         for s in steps:
             for field in ("id", "label", "description", "type"):
@@ -207,7 +178,7 @@ class StructureValidator:
             "Sin campos vacíos" if not empty_bad else f"Vacíos: {empty_bad[:3]}",
         ))
 
-        # ── Score ponderado ────────────────────────────────────────────────────
+        # score ponderado
         total_w    = sum(c.weight for c in checks)
         passed_w   = sum(c.weight for c in checks if c.passed)
         score      = round((passed_w / total_w) * 10, 2) if total_w else 0.0
@@ -223,5 +194,5 @@ class StructureValidator:
                 {"name": c.name, "passed": c.passed, "detail": c.detail, "weight": c.weight}
                 for c in checks
             ],
-            "violations": [c.detail for c in checks if not c.passed],
+            "violations": [c.detail for c in checks if not c.passed],  # solo los que fallaron
         }

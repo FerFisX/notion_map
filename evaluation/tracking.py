@@ -1,17 +1,6 @@
 """
-tracking.py — Capa opcional de MLflow para registrar cada corrida de evaluación.
-
-NO reemplaza el sistema de evaluación; se pone encima.
-Registra por cada run:
-  - params:    modelo, método de re-ranking, k, umbrales, nº de muestras...
-  - metrics:   MESE, estructura, similitud, tiempos, RAGAS, corpus...
-  - artifacts: eval_report.html / .json / human_review.csv
-
-Si MLflow no está instalado, todo se omite silenciosamente (no rompe la evaluación).
-
-Ver el dashboard:
-  python -m mlflow ui --backend-store-uri sqlite:///mlflow.db
-  -> http://localhost:5000
+Capa opcional de MLflow para registrar cada corrida de evaluación.
+Si MLflow no está instalado, todo se omite silenciosamente.
 """
 
 from __future__ import annotations
@@ -36,8 +25,7 @@ def mlflow_available() -> bool:
         return False
 
 
-# ── Aplana los resultados a un dict plano de métricas numéricas ───────────────
-
+# aplana los resultados a un dict de métricas numéricas
 def _flatten_metrics(judge: dict, ragas: dict, corpus: dict) -> dict:
     m: dict[str, float] = {}
 
@@ -85,8 +73,7 @@ def _flatten_metrics(judge: dict, ragas: dict, corpus: dict) -> dict:
     return m
 
 
-# ── Registra una corrida completa ─────────────────────────────────────────────
-
+# registra una corrida completa
 def log_evaluation(
     run_name:       str,
     params:         dict,
@@ -108,7 +95,6 @@ def log_evaluation(
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
     mlflow.set_tracking_uri(TRACKING_URI)
 
-    # Crear el experimento con ubicación de artefactos local si no existe
     if mlflow.get_experiment_by_name(EXPERIMENT) is None:
         mlflow.create_experiment(EXPERIMENT, artifact_location=Path(ARTIFACT_DIR).as_uri())
     mlflow.set_experiment(EXPERIMENT)
@@ -116,7 +102,7 @@ def log_evaluation(
     metrics = _flatten_metrics(judge_results, ragas_results, corpus_results)
 
     with mlflow.start_run(run_name=run_name):
-        # params (todo a str para evitar problemas de tipos)
+        # params a str para evitar problemas de tipos
         mlflow.log_params({k: str(v) for k, v in params.items()})
         if metrics:
             mlflow.log_metrics(metrics)

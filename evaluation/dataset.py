@@ -19,7 +19,7 @@ class EvalSample:
 
 EVAL_SAMPLES: List[EvalSample] = [
 
-    # ── Llaves candidatas ─────────────────────────────────────────────────
+    # Llaves candidatas
     EvalSample(
         question="¿Qué es una llave candidata en bases de datos?",
         ground_truth=(
@@ -69,7 +69,7 @@ EVAL_SAMPLES: List[EvalSample] = [
         ],
     ),
 
-    # ── Power Query ───────────────────────────────────────────────────────
+    # Power Query
     EvalSample(
         question="¿Cuál es la complejidad en tiempo de las operaciones en Power Query?",
         ground_truth=(
@@ -107,7 +107,7 @@ EVAL_SAMPLES: List[EvalSample] = [
         ],
     ),
 
-    # ── N8N con agentes IA ─────────────────────────────────────────────────
+    # N8N con agentes IA
     EvalSample(
         question="¿Cómo crear un flujo con agentes IA en N8N?",
         ground_truth=(

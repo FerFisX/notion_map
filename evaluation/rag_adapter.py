@@ -1,7 +1,4 @@
-"""
-rag_adapter.py — Puente entre RagEngine y los evaluadores.
-Expone contextos recuperados y convierte el roadmap JSON a texto plano.
-"""
+"""Puente entre RagEngine y los evaluadores: expone contextos y convierte el roadmap a texto."""
 
 import os
 import sys
@@ -21,17 +18,7 @@ class RagAdapter:
         print("  RagEngine listo.")
 
     def query(self, question: str) -> dict:
-        """
-        Retorna un dict con todo lo necesario para evaluación.
-
-        Returns:
-            {
-                "question":  str,
-                "answer":    str,   <- roadmap como texto legible
-                "contexts":  list,  <- chunks recuperados de ChromaDB
-                "roadmap":   dict,  <- JSON original del roadmap
-            }
-        """
+        """Retorna question, answer (texto), contexts y roadmap (dict)."""
         contexts = self.engine.retrieve_contexts(question)
         roadmap  = self.engine.generate_roadmap(question)
         answer   = self.roadmap_to_text(roadmap)

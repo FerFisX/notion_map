@@ -10,20 +10,17 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from src.llm_provider import get_llm, active_model_name
 
-# Rutas absolutas — funcionan sin importar desde qué carpeta se ejecute
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 DB_PATH = os.path.join(BASE_DIR, "vectorstore", "chroma_db")
 
-# ── Configuración de retrieval + re-ranking ───────────────────────────────────
-# RERANK_METHOD: "mmr" (default, sin descargas) | "crossencoder" (más preciso, ~80MB)
-#                | "none" (sin re-ranking, solo orden del vector store)
+# Retrieval / re-ranking. RERANK_METHOD: mmr | crossencoder | none
 RERANK_METHOD = os.getenv("RERANK_METHOD", "mmr").lower().strip()
-POOL_SIZE     = int(os.getenv("RETRIEVAL_POOL_SIZE", "10"))   # candidatos iniciales
-TOP_N         = int(os.getenv("RETRIEVAL_TOP_N", "5"))        # cuántos pasan al LLM
+POOL_SIZE     = int(os.getenv("RETRIEVAL_POOL_SIZE", "10"))
+TOP_N         = int(os.getenv("RETRIEVAL_TOP_N", "5"))
 
-# --- ESTRUCTURA DE DATOS ---
+
 class RoadmapStep(BaseModel):
     id: str = Field(description="ID corto único, ej: 'step_1'")
     label: str = Field(
@@ -62,13 +59,8 @@ class RagEngine:
         self.llm = get_llm(temperature=0.1, max_tokens=4096)
         self.parser = JsonOutputParser(pydantic_object=Roadmap)
 
-    # ── Query Rewriting ───────────────────────────────────────────────────────
     def rewrite_query(self, raw_query: str) -> str:
-        """
-        Preprocesa la consulta del usuario antes de enviarla al retrieval y al LLM.
-        Expande, clarifica y añade terminología técnica para mejorar la búsqueda
-        semántica en ChromaDB y la calidad del roadmap resultante.
-        """
+        """Expande la consulta del usuario para mejorar el retrieval y el roadmap."""
         prompt = (
             "Eres un experto en sistemas RAG técnicos. "
             "Reescribe la siguiente consulta del usuario para hacerla más específica, técnica "
@@ -90,7 +82,6 @@ class RagEngine:
         print(f"  [Query Rewriting]\n    Original : {raw_query}\n    Mejorada : {rewritten}")
         return rewritten
 
-    # ── Cross-encoder re-ranker (lazy) ─────────────────────────────────────────
     _cross_encoder = None
 
     def _get_cross_encoder(self):
@@ -106,7 +97,6 @@ class RagEngine:
                 RagEngine._cross_encoder = False
         return RagEngine._cross_encoder or None
 
-    # ── Retrieval + Re-ranking ─────────────────────────────────────────────────
     def retrieve_contexts_scored(
         self,
         query:     str,
@@ -115,19 +105,12 @@ class RagEngine:
         method:    str  = None,
     ) -> dict:
         """
-        Recupera un pool de candidatos con sus scores, los RE-RANKEA y devuelve
-        los top_n. Inspirado en Rothman cap. 3 y 7.
-
-        Returns:
-            {
-              "method":   str,
-              "pool":     [ {text, vector_score, init_rank, source, rerank_score?} ],
-              "selected": [ {text, init_rank, final_rank, final_score, source} ],
-            }
+        Recupera un pool de candidatos, los re-rankea y devuelve los top_n.
+        Devuelve {method, pool, selected} con scores para inspección.
         """
         method = (method or RERANK_METHOD).lower().strip()
 
-        # 1. Pool inicial con scores de similitud del vector store
+        # Pool inicial con scores del vector store
         scored = self.vector_db.similarity_search_with_relevance_scores(query, k=pool_size)
         pool = []
         for i, (doc, score) in enumerate(scored, 1):
@@ -141,7 +124,6 @@ class RagEngine:
         if not pool:
             return {"method": method, "pool": [], "selected": []}
 
-        # 2. Re-ranking según el método
         if method == "none":
             ranked = pool
 
@@ -166,12 +148,10 @@ class RagEngine:
                     "init_rank":    None,
                     "source":       doc.metadata.get("source", "?"),
                 }))
-            # añade los no seleccionados al final para mantener el pool completo visible
             for c in pool:
                 if c["text"] not in {r["text"] for r in ranked}:
                     ranked.append(c)
 
-        # 3. Selección final
         selected = []
         for r, c in enumerate(ranked[:top_n], 1):
             item = dict(c)
@@ -186,17 +166,11 @@ class RagEngine:
         result = self.retrieve_contexts_scored(query)
         return [c["text"] for c in result["selected"]]
 
-    # ── Generación ────────────────────────────────────────────────────────────
     def generate_roadmap(self, query: str):
         try:
-            # 1. Mejorar la consulta antes del retrieval
             refined_query = self.rewrite_query(query)
-
-            # 2. Recuperar contexto con la consulta mejorada (con re-ranking)
             print(f"  [Retrieval] Buscando con consulta refinada...")
             contexts = self.retrieve_contexts(refined_query)
-
-            # 3. Construir el roadmap
             return self.build_roadmap(query, refined_query, contexts)
 
         except Exception as e:
@@ -210,11 +184,7 @@ class RagEngine:
             }
 
     def build_roadmap(self, original_query: str, refined_query: str, contexts: list):
-        """
-        Construye el roadmap a partir de una consulta refinada y contextos ya
-        recuperados. Separado de generate_roadmap para que el laboratorio de
-        evaluación pueda reutilizar el mismo retrieval sin re-ejecutarlo.
-        """
+        """Construye el roadmap con la consulta refinada y los contextos ya recuperados."""
         try:
             context = "\n\n---\n\n".join(contexts) if contexts else (
                 "No hay contexto específico recuperado. "

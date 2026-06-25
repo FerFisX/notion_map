@@ -1,51 +1,8 @@
 """
-llm_judge.py — LLM-as-a-Judge para roadmaps de NotionMap.
-
-Evalúa cada roadmap en DOS marcos simultáneos:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- CRITERIOS CLÁSICOS (0-10 cada uno)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  relevance          ¿El roadmap responde la pregunta del usuario?
-  completeness       ¿Cubre todos los pasos esenciales?
-  coherence          ¿Los pasos tienen orden lógico?
-  technical_accuracy ¿Los detalles técnicos son correctos?
-  context_fidelity   ¿Se basa en el contexto sin alucinaciones?
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- MESE — Mutually Exclusive, Simultaneously Exhaustive
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  M = Mapping        Precisión factual de CADA paso vs contexto
-                     (¿está correcto lo que dice?)
-  E = Exhaustiveness Cobertura: ¿FALTA algún paso importante?
-                     (¿está todo lo necesario?)
-  S = Sequence       Orden lógico y dependencias causales
-                     (¿el paso N necesita que N-1 ya ocurrió?)
-  E = Experience     Claridad y usabilidad para el usuario final
-                     (¿puede seguirlo sin ambigüedad?)
-
-  Prueba de exclusividad mutua:
-    - Un roadmap puede ser preciso  (M=10) pero incompleto  (E=2)
-    - Un roadmap puede estar completo (E=10) pero desordenado (S=2)
-    - Un roadmap puede estar ordenado (S=10) pero confuso    (E2=2)
-    → Cada dimensión puede fallar independientemente ✓
-
-  Prueba de exhaustividad simultánea:
-    M + E + S + E = precisión + cobertura + orden + usabilidad
-    → Juntos cubren TODA la calidad posible de un roadmap ✓
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- ANÁLISIS DE SECUENCIA (rúbrica dedicada)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  - Score 0-10 del orden lógico
-  - Lista exacta de pasos fuera de lugar
-  - Sugerencia de reordenamiento
-  - Flag is_valid para revisión humana
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- TABLA INPUT/OUTPUT PARA REVISIÓN HUMANA
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Generada por reporter.py — HTML con campos editables + CSV
+LLM-as-a-Judge para los roadmaps. Evalúa cada roadmap con criterios clásicos
+(relevancia, completitud, coherencia, precisión, fidelidad), las cuatro
+dimensiones MESE (Mapping, Exhaustiveness, Sequence, Experience), un análisis
+de secuencia dedicado, validación de estructura y similitud query-respuesta.
 """
 from __future__ import annotations
 
@@ -63,8 +20,6 @@ from evaluation.structure_validator import StructureValidator
 from evaluation.similarity_metrics import query_answer_relevance
 from src.llm_provider import get_llm, active_model_name
 
-
-# ── Schemas de salida ─────────────────────────────────────────────────────────
 
 class CriterionScore(BaseModel):
     score:         int = Field(ge=0, le=10, description="Puntuación 0-10")
@@ -116,8 +71,6 @@ class MESEScores(BaseModel):
 
     composite: float = Field(default=0.0, description="Score ponderado (calculado automáticamente)")
 
-
-# ── Prompt ────────────────────────────────────────────────────────────────────
 
 _PROMPT_TEMPLATE = """\
 Eres un evaluador experto en sistemas RAG y roadmaps técnicos.
@@ -219,16 +172,12 @@ JSON esperado (sin markdown):
 """
 
 
-# ── Evaluador ─────────────────────────────────────────────────────────────────
-
 class LLMJudgeEvaluator:
 
     def __init__(self, cfg: EvalConfig = config):
         self.cfg = cfg
         self.llm = get_llm(temperature=cfg.judge_temperature, max_tokens=4096)
         self.structure_validator = StructureValidator()
-
-    # ── Evalúa una muestra ────────────────────────────────────────────────
 
     def _judge_single(
         self,
@@ -255,8 +204,6 @@ class LLMJudgeEvaluator:
                 raw = raw[4:]
         return json.loads(raw.strip())
 
-    # ── Calcula MESE compuesto ────────────────────────────────────────────
-
     def _mese_composite(self, mese: dict) -> float:
         w = self.cfg.mese_weights
         return round(
@@ -267,12 +214,10 @@ class LLMJudgeEvaluator:
             2,
         )
 
-    # ── Imprime resultado verbose de una muestra ─────────────────────────
-
     @staticmethod
     def _print_verbose(i: int, total: int, sample_result: dict) -> None:
-        SEP  = "─" * 60
-        SEP2 = "═" * 60
+        SEP  = "-" * 60
+        SEP2 = "=" * 60
         q    = sample_result["question"]
         cl   = sample_result["classic"]
         mese = sample_result["mese"]
@@ -372,8 +317,6 @@ class LLMJudgeEvaluator:
         print(f"  SCORE GENERAL: {ov:.2f}/10  {verd_sym}")
         print(f"{SEP2}\n")
 
-    # ── Corre todos los samples ───────────────────────────────────────────
-
     def evaluate(self, adapter: RagAdapter, samples: List[EvalSample],
                  verbose: bool = False) -> dict:
         per_sample   = []
@@ -409,7 +352,7 @@ class LLMJudgeEvaluator:
                 # Validación de estructura (determinística, sin LLM)
                 struct_result = self.structure_validator.validate(result["roadmap"])
 
-                # Similitud query↔respuesta (cap. 2 Rothman — métrica automática)
+                # similitud query-respuesta (metrica automatica)
                 similarity = query_answer_relevance(sample.question, result["answer"])
 
                 sample_result = {
@@ -457,8 +400,6 @@ class LLMJudgeEvaluator:
             "seq_valid_pct":  round(seq_valid_pct, 4),
         }
 
-    # ── Agrega estadísticas ───────────────────────────────────────────────
-
     @staticmethod
     def _aggregate(per_sample: list, classic_keys: list, mese_keys: list) -> dict:
         n = len(per_sample)
@@ -500,8 +441,6 @@ class LLMJudgeEvaluator:
             },
         }
 
-
-# ── Función de conveniencia (para runner.py) ──────────────────────────────────
 
 def run_judge(adapter: RagAdapter, samples: List[EvalSample],
               verbose: bool = False) -> dict:

@@ -1,20 +1,4 @@
-"""
-runner.py — CLI para correr las evaluaciones.
-
-Modos disponibles:
-  python -m evaluation.runner                   # todo: RAGAS + Judge (con estructura) + Corpus
-  python -m evaluation.runner --mode judge      # solo LLM Judge (incluye estructura y tiempo)
-  python -m evaluation.runner --mode ragas      # solo RAGAS
-  python -m evaluation.runner --mode corpus     # solo juez del knowledge base
-  python -m evaluation.runner --mode structure  # solo validación de estructura (sin LLM)
-  python -m evaluation.runner --samples 3       # evaluar 3 muestras
-  python -m evaluation.runner --verbose         # mostrar justificaciones en consola
-
-MLflow (tracking de experimentos):
-  python -m evaluation.runner --run-name "mmr_k10"   # nombra la corrida
-  python -m evaluation.runner --no-mlflow            # no registrar en MLflow
-  python -m mlflow ui --backend-store-uri file:./mlruns   # ver dashboard (http://localhost:5000)
-"""
+"""CLI para correr las evaluaciones (RAGAS, LLM Judge, corpus, estructura)."""
 
 import os
 import sys
@@ -100,17 +84,15 @@ def run(mode: str = "all", n_samples: int = None, html: bool = True,
     judge_results  = None
     corpus_results = None
 
-    # ── RAGAS ────────────────────────────────────────────────────────────────
     if mode in ("ragas", "all"):
         from evaluation.ragas_evaluator import run_ragas
         ragas_results = run_ragas(adapter, samples)
 
-    # ── LLM Judge (incluye estructura + tiempo de respuesta) ─────────────────
     if mode in ("judge", "all"):
         from evaluation.llm_judge import run_judge
         judge_results = run_judge(adapter, samples, verbose=verbose)
 
-    # ── Solo validación de estructura (sin LLM) ───────────────────────────────
+    # validacion de estructura sin LLM
     if mode == "structure":
         from evaluation.structure_validator import StructureValidator
         validator = StructureValidator()
@@ -130,12 +112,10 @@ def run(mode: str = "all", n_samples: int = None, html: bool = True,
         print(f"\n  Estructura evaluada para {len(struct_results)} muestras.")
         return
 
-    # ── Corpus Judge ──────────────────────────────────────────────────────────
     if mode in ("corpus", "all"):
         from evaluation.corpus_judge import run_corpus_judge
         corpus_results = run_corpus_judge(max_chunks=max_corpus_chunks)
 
-    # ── Guardar resultados ────────────────────────────────────────────────────
     os.makedirs(config.reports_dir, exist_ok=True)
 
     combined = {
@@ -166,7 +146,7 @@ def run(mode: str = "all", n_samples: int = None, html: bool = True,
         csv_path = os.path.join(config.reports_dir, "human_review.csv")
         save_human_review_csv(judge_results, csv_path)
 
-    # ── MLflow tracking (registra esta corrida para comparar experimentos) ────
+    # MLflow tracking
     rerank_method = os.getenv("RERANK_METHOD", "mmr")
     params = {
         "mode":          mode,
