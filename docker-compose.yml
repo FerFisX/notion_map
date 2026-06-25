@@ -1,0 +1,15 @@
+services:
+  neo4j:
+    image: neo4j:5
+    container_name: notionmap-neo4j
+    ports:
+      - "7475:7474"   # Browser UI  → http://localhost:7475
+      - "7688:7687"   # Bolt driver → bolt://localhost:7688
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-notionmap2024}
+    volumes:
+      - neo4j_vol:/data   # datos persistentes en volumen Docker (más estable que OneDrive)
+    restart: unless-stopped
+
+volumes:
+  neo4j_vol:

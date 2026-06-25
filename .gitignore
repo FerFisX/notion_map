@@ -4,3 +4,9 @@
 
 # Permitir ejemplos de entorno
 !.env.example
+
+# MLflow
+mlflow.db
+mlflow.db-journal
+mlartifacts/
+mlruns/

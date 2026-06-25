@@ -3,74 +3,295 @@ from typing import List
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
-load_dotenv()
+from src.llm_provider import get_llm, active_model_name
 
-DB_PATH = "vectorstore/chroma_db"
+# Rutas absolutas — funcionan sin importar desde qué carpeta se ejecute
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+DB_PATH = os.path.join(BASE_DIR, "vectorstore", "chroma_db")
+
+# ── Configuración de retrieval + re-ranking ───────────────────────────────────
+# RERANK_METHOD: "mmr" (default, sin descargas) | "crossencoder" (más preciso, ~80MB)
+#                | "none" (sin re-ranking, solo orden del vector store)
+RERANK_METHOD = os.getenv("RERANK_METHOD", "mmr").lower().strip()
+POOL_SIZE     = int(os.getenv("RETRIEVAL_POOL_SIZE", "10"))   # candidatos iniciales
+TOP_N         = int(os.getenv("RETRIEVAL_TOP_N", "5"))        # cuántos pasan al LLM
 
 # --- ESTRUCTURA DE DATOS ---
 class RoadmapStep(BaseModel):
-    id: str = Field(description="ID corto, ej: 'step_1'")
-    label: str = Field(description="Título de la acción")
-    description: str = Field(description="Explicación breve")
-    type: str = Field(description="Tipo: 'inicio', 'proceso', 'decision', 'fin'")
-    # CAMBIO: Instrucción clara para que sea una lista opcional
-    key_points: List[str] = Field(description="Lista de 1 a 3 detalles técnicos ESPECÍFICOS (versiones, comandos, herramientas). Dejar vacío si no hay detalles críticos.")
+    id: str = Field(description="ID corto único, ej: 'step_1'")
+    label: str = Field(
+        description="Verbo de acción + objeto específico. Ej: 'Verificar unicidad de atributos' NO 'Revisar el sistema'"
+    )
+    description: str = Field(
+        description=(
+            "Mínimo 2 oraciones. Explica QUÉ se hace, POR QUÉ es necesario y CÓMO se ejecuta. "
+            "Incluye herramientas, conceptos técnicos o configuraciones reales del contexto. "
+            "PROHIBIDO: frases genéricas como 'este paso es importante' o 'se debe configurar el sistema'."
+        )
+    )
+    type: str = Field(description="Tipo del nodo: 'inicio', 'proceso', 'decision', 'fin'")
+    key_points: List[str] = Field(
+        description=(
+            "Entre 3 y 5 items OBLIGATORIOS. Cada item es UNO de: "
+            "comando exacto con parámetros, valor de configuración específico, "
+            "advertencia técnica crítica, herramienta con versión, o resultado verificable esperado. "
+            "PROHIBIDO: items vagos como 'tener cuidado' o 'revisar la documentación'."
+        )
+    )
 
 class Roadmap(BaseModel):
-    title: str = Field(description="Título del proceso")
-    steps: List[RoadmapStep] = Field(description="Lista de pasos secuenciales")
+    title: str = Field(description="Título conciso del proceso completo")
+    steps: List[RoadmapStep] = Field(
+        description="Lista ordenada de 6 a 12 pasos. Cada paso debe ser independiente y verificable."
+    )
 
 # --- MOTOR RAG ---
 class RagEngine:
     def __init__(self):
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         self.vector_db = Chroma(persist_directory=DB_PATH, embedding_function=self.embeddings)
-        # Temperature baja para precisión técnica
-        self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
+
+        print(f"  Modelo: {active_model_name()}")
+        self.llm = get_llm(temperature=0.1, max_tokens=4096)
         self.parser = JsonOutputParser(pydantic_object=Roadmap)
 
+    # ── Query Rewriting ───────────────────────────────────────────────────────
+    def rewrite_query(self, raw_query: str) -> str:
+        """
+        Preprocesa la consulta del usuario antes de enviarla al retrieval y al LLM.
+        Expande, clarifica y añade terminología técnica para mejorar la búsqueda
+        semántica en ChromaDB y la calidad del roadmap resultante.
+        """
+        prompt = (
+            "Eres un experto en sistemas RAG técnicos. "
+            "Reescribe la siguiente consulta del usuario para hacerla más específica, técnica "
+            "y adecuada para búsqueda semántica en una base de conocimiento.\n\n"
+            "REGLAS:\n"
+            "- Añade terminología técnica relevante del dominio\n"
+            "- Especifica el objetivo final que el usuario quiere lograr\n"
+            "- Expande siglas o términos ambiguos\n"
+            "- Mantén el idioma original\n"
+            "- Responde SOLO con la consulta mejorada, sin explicaciones ni prefijos\n\n"
+            f"Consulta original: {raw_query}\n\n"
+            "Consulta mejorada:"
+        )
+        rewritten = self.llm.invoke(prompt).content.strip()
+        # Limpiar prefijos que el modelo pueda agregar
+        for prefix in ("Consulta mejorada:", "Aquí", "La consulta"):
+            if rewritten.startswith(prefix):
+                rewritten = rewritten[len(prefix):].strip()
+        print(f"  [Query Rewriting]\n    Original : {raw_query}\n    Mejorada : {rewritten}")
+        return rewritten
+
+    # ── Cross-encoder re-ranker (lazy) ─────────────────────────────────────────
+    _cross_encoder = None
+
+    def _get_cross_encoder(self):
+        """Carga perezosa del cross-encoder. Devuelve None si no está disponible."""
+        if RagEngine._cross_encoder is None:
+            try:
+                from sentence_transformers import CrossEncoder
+                RagEngine._cross_encoder = CrossEncoder(
+                    "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                )
+            except Exception as e:
+                print(f"  [Re-rank] Cross-encoder no disponible ({e}); usando MMR.")
+                RagEngine._cross_encoder = False
+        return RagEngine._cross_encoder or None
+
+    # ── Retrieval + Re-ranking ─────────────────────────────────────────────────
+    def retrieve_contexts_scored(
+        self,
+        query:     str,
+        pool_size: int  = POOL_SIZE,
+        top_n:     int  = TOP_N,
+        method:    str  = None,
+    ) -> dict:
+        """
+        Recupera un pool de candidatos con sus scores, los RE-RANKEA y devuelve
+        los top_n. Inspirado en Rothman cap. 3 y 7.
+
+        Returns:
+            {
+              "method":   str,
+              "pool":     [ {text, vector_score, init_rank, source, rerank_score?} ],
+              "selected": [ {text, init_rank, final_rank, final_score, source} ],
+            }
+        """
+        method = (method or RERANK_METHOD).lower().strip()
+
+        # 1. Pool inicial con scores de similitud del vector store
+        scored = self.vector_db.similarity_search_with_relevance_scores(query, k=pool_size)
+        pool = []
+        for i, (doc, score) in enumerate(scored, 1):
+            pool.append({
+                "text":         doc.page_content,
+                "vector_score": round(float(score), 4),
+                "init_rank":    i,
+                "source":       doc.metadata.get("source", "?"),
+            })
+
+        if not pool:
+            return {"method": method, "pool": [], "selected": []}
+
+        # 2. Re-ranking según el método
+        if method == "none":
+            ranked = pool
+
+        elif method == "crossencoder" and self._get_cross_encoder():
+            ce     = self._get_cross_encoder()
+            scores = ce.predict([(query, c["text"]) for c in pool])
+            for c, s in zip(pool, scores):
+                c["rerank_score"] = round(float(s), 4)
+            ranked = sorted(pool, key=lambda c: c["rerank_score"], reverse=True)
+
+        else:  # "mmr" — relevancia + diversidad, sin descargas adicionales
+            method   = "mmr"
+            mmr_docs = self.vector_db.max_marginal_relevance_search(
+                query, k=min(top_n, len(pool)), fetch_k=pool_size
+            )
+            by_text = {c["text"]: c for c in pool}
+            ranked  = []
+            for doc in mmr_docs:
+                ranked.append(by_text.get(doc.page_content, {
+                    "text":         doc.page_content,
+                    "vector_score": None,
+                    "init_rank":    None,
+                    "source":       doc.metadata.get("source", "?"),
+                }))
+            # añade los no seleccionados al final para mantener el pool completo visible
+            for c in pool:
+                if c["text"] not in {r["text"] for r in ranked}:
+                    ranked.append(c)
+
+        # 3. Selección final
+        selected = []
+        for r, c in enumerate(ranked[:top_n], 1):
+            item = dict(c)
+            item["final_rank"]  = r
+            item["final_score"] = c.get("rerank_score", c.get("vector_score"))
+            selected.append(item)
+
+        return {"method": method, "pool": pool, "selected": selected}
+
+    def retrieve_contexts(self, query: str) -> list:
+        """Returns raw text of retrieved chunks (re-ranked). Used by evaluators."""
+        result = self.retrieve_contexts_scored(query)
+        return [c["text"] for c in result["selected"]]
+
+    # ── Generación ────────────────────────────────────────────────────────────
     def generate_roadmap(self, query: str):
         try:
-            print(f"Buscando contexto para: '{query}'...")
-            docs = self.vector_db.similarity_search(query, k=4)
-            context = "\n".join([d.page_content for d in docs])
-            
-            if not context:
-                context = "No hay contexto específico. Genera pasos lógicos estándar."
+            # 1. Mejorar la consulta antes del retrieval
+            refined_query = self.rewrite_query(query)
 
-            # Prompt ajustado para bifurcaciones
-            template = """
-            Eres un arquitecto técnico. Crea un Roadmap para: "{query}".
-            CONTEXTO: {context}
-            
-            REGLAS:
-            1. Genera un JSON válido con una lista de pasos secuenciales.
-            2. Campo 'key_points': ÚSALO SOLO SI hay un detalle técnico crucial (ej: "Usar Python 3.10", "Puerto 8000", "Cuidado con CORS").
-            3. Si un paso es genérico, deja 'key_points' como lista vacía [].
-            
-            {format_instructions}
-            """
-            
-            prompt = PromptTemplate(
-                template=template,
-                input_variables=["query", "context"],
-                partial_variables={"format_instructions": self.parser.get_format_instructions()}
-            )
+            # 2. Recuperar contexto con la consulta mejorada (con re-ranking)
+            print(f"  [Retrieval] Buscando con consulta refinada...")
+            contexts = self.retrieve_contexts(refined_query)
 
-            chain = prompt | self.llm | self.parser
-            return chain.invoke({"query": query, "context": context})
+            # 3. Construir el roadmap
+            return self.build_roadmap(query, refined_query, contexts)
 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error generando roadmap: {e}")
             return {
                 "title": "Error",
                 "steps": [{
-                    "id": "err", "label": "Error de Sistema", "description": str(e)[:100], "type": "decision", "key_points": []
+                    "id": "err", "label": "Error de Sistema",
+                    "description": str(e)[:200], "type": "decision", "key_points": []
+                }]
+            }
+
+    def build_roadmap(self, original_query: str, refined_query: str, contexts: list):
+        """
+        Construye el roadmap a partir de una consulta refinada y contextos ya
+        recuperados. Separado de generate_roadmap para que el laboratorio de
+        evaluación pueda reutilizar el mismo retrieval sin re-ejecutarlo.
+        """
+        try:
+            context = "\n\n---\n\n".join(contexts) if contexts else (
+                "No hay contexto específico recuperado. "
+                "Genera pasos basados en conocimiento técnico general del dominio."
+            )
+
+            template = """\
+Eres un arquitecto técnico senior con experiencia en documentación de procesos empresariales.
+Tu tarea es crear un roadmap TÉCNICO, ESPECÍFICO y ACCIONABLE.
+
+═══════════════════════════════════════════════════
+CONSULTA ORIGINAL DEL USUARIO
+═══════════════════════════════════════════════════
+{original_query}
+
+═══════════════════════════════════════════════════
+CONSULTA ENRIQUECIDA (usa esta para el roadmap)
+═══════════════════════════════════════════════════
+{refined_query}
+
+═══════════════════════════════════════════════════
+CONTEXTO TÉCNICO RECUPERADO DE LA BASE DE CONOCIMIENTO
+═══════════════════════════════════════════════════
+{context}
+
+═══════════════════════════════════════════════════
+ESTÁNDARES DE CALIDAD OBLIGATORIOS
+═══════════════════════════════════════════════════
+
+PARA CADA PASO — EXIGENCIAS MÍNIMAS:
+
+  label:
+    ✅ "Verificar la propiedad de unicidad en cada columna candidata"
+    ❌ "Verificar datos"
+
+  description (mínimo 2 oraciones):
+    ✅ "Se comprueba que ningún valor se repite en la columna candidata usando
+        la restricción UNIQUE. Esta propiedad garantiza que cada fila pueda
+        ser identificada de forma inequívoca sin depender de otras columnas."
+    ❌ "Este paso es importante para el proceso."
+
+  key_points (3 a 5 items, cada uno concreto):
+    ✅ ["Consulta SQL: SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1",
+        "CUIDADO: NULL no viola unicidad en algunos motores (PostgreSQL, MySQL)",
+        "Resultado esperado: cero filas duplicadas en la columna candidata"]
+    ❌ ["Tener cuidado", "Revisar documentación", "Es importante"]
+
+REGLAS GENERALES:
+  - Genera entre 6 y 12 pasos (ni muy pocos ni demasiados)
+  - Prioriza información del contexto recuperado sobre conocimiento genérico
+  - Si el contexto no cubre un paso, indícalo: "[inferido]" al inicio del label
+  - Cada paso debe ser ejecutable de forma independiente y verificable
+  - NUNCA uses frases de relleno ni pasos obvios sin detalle técnico
+
+{format_instructions}
+"""
+            prompt = PromptTemplate(
+                template=template,
+                input_variables=["original_query", "refined_query", "context"],
+                partial_variables={"format_instructions": self.parser.get_format_instructions()},
+            )
+
+            chain = prompt | self.llm | self.parser
+            result = chain.invoke({
+                "original_query": original_query,
+                "refined_query":  refined_query,
+                "context":        context,
+            })
+            print(f"  [Generación] {len(result.get('steps', []))} pasos generados.")
+            return result
+
+        except Exception as e:
+            print(f"Error generando roadmap: {e}")
+            return {
+                "title": "Error",
+                "steps": [{
+                    "id": "err", "label": "Error de Sistema",
+                    "description": str(e)[:200], "type": "decision", "key_points": []
                 }]
             }

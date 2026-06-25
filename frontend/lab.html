@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NotionMap — Laboratorio de Evaluación</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117; --panel: #1a1d27; --panel2: #232735;
+    --txt: #e6e8ee; --muted: #9aa0b0; --line: #2c3142;
+    --accent: #6c8cff;
+    --green2:#3ecf8e; --orange2:#f5a623; --red2:#f5557a;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--txt); padding: 24px; line-height: 1.5; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  a { color: var(--accent); }
+
+  .controls { background: var(--panel); border: 1px solid var(--line);
+              border-radius: 12px; padding: 18px; margin-bottom: 20px; }
+  textarea { width: 100%; background: var(--panel2); color: var(--txt);
+             border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+             font-size: 14px; resize: vertical; min-height: 56px; font-family: inherit; }
+  .opts { display: flex; flex-wrap: wrap; gap: 14px; margin: 14px 0; align-items: center; }
+  .opt { display: flex; align-items: center; gap: 6px; font-size: 13px;
+         background: var(--panel2); padding: 6px 12px; border-radius: 20px;
+         border: 1px solid var(--line); cursor: pointer; user-select: none; }
+  .opt input { accent-color: var(--accent); }
+  select { background: var(--panel2); color: var(--txt); border: 1px solid var(--line);
+           border-radius: 6px; padding: 5px 8px; font-size: 13px; }
+  .run-btn { background: var(--accent); color: #fff; border: none; padding: 11px 26px;
+             border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .run-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  .step { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          margin-bottom: 14px; overflow: hidden; opacity: 0; transform: translateY(8px);
+          animation: rise .4s forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .step-head { padding: 14px 18px; cursor: pointer; display: flex; align-items: center;
+               gap: 12px; border-left: 4px solid var(--accent); }
+  .step-head h3 { font-size: 15px; flex: 1; }
+  .chip { font-size: 11px; padding: 2px 9px; border-radius: 12px; background: var(--panel2);
+          color: var(--muted); border: 1px solid var(--line); }
+  .step-body { padding: 0 18px 18px 22px; }
+  .meta-row { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+  .meta-box { flex: 1; min-width: 220px; font-size: 13px; }
+  .meta-box .lbl { color: var(--accent); font-weight: 600; font-size: 11px;
+                   text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
+  .meta-box .val { color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; padding: 7px 8px;
+       border-bottom: 1px solid var(--line); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.selected td { background: rgba(62,207,142,.08); }
+  .rank { font-weight: 700; color: var(--accent); }
+
+  .qbox { display: flex; gap: 12px; align-items: stretch; }
+  .qcard { flex: 1; background: var(--panel2); border: 1px solid var(--line);
+           border-radius: 8px; padding: 12px; font-size: 13px; }
+  .qcard .lbl { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .arrow { display: flex; align-items: center; color: var(--accent); font-size: 22px; }
+
+  .bar-wrap { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; }
+  .bar-wrap .name { width: 130px; color: var(--muted); }
+  .bar-track { flex: 1; height: 10px; background: var(--panel2); border-radius: 5px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 5px; }
+  .bar-wrap .num { width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .check { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; font-size: 13px; }
+  .check .ico { width: 16px; flex-shrink: 0; font-weight: 700; }
+  .pass { color: var(--green2); } .fail { color: var(--red2); } .warn { color: var(--orange2); }
+
+  .verdict { font-weight: 700; padding: 3px 12px; border-radius: 14px; font-size: 12px; }
+  .v-pass { background: rgba(62,207,142,.15); color: var(--green2); }
+  .v-fail { background: rgba(245,85,122,.15); color: var(--red2); }
+
+  .rm-step { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+             padding: 10px 12px; margin: 8px 0; }
+  .rm-step .lab { font-weight: 600; font-size: 13.5px; }
+  .rm-step .typ { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: var(--bg);
+                  color: var(--muted); margin-left: 6px; }
+  .rm-step .desc { color: var(--muted); font-size: 12.5px; margin: 5px 0; }
+  .rm-step ul { margin: 4px 0 0 18px; font-size: 12px; color: var(--txt); }
+  .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 40px; }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--line);
+             border-top-color: var(--accent); border-radius:50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<h1>🧪 Laboratorio de Evaluación — NotionMap</h1>
+<div class="sub">Ejecuta el pipeline RAG paso a paso. Elige qué pruebas correr y observa cómo cada etapa mejora la respuesta. &nbsp;|&nbsp; <a href="/">← volver a la app</a></div>
+
+<div class="controls">
+  <textarea id="question" placeholder="Escribe una consulta, ej: ¿cómo crear una base de datos relacional?">¿Cómo identificar una llave candidata en una base de datos?</textarea>
+
+  <div class="opts">
+    <label class="opt"><input type="checkbox" id="rerank" checked> Re-ranking</label>
+    <select id="method">
+      <option value="mmr">MMR (relevancia + diversidad)</option>
+      <option value="crossencoder">Cross-Encoder (más preciso)</option>
+      <option value="none">Sin re-ranking</option>
+    </select>
+    <label class="opt"><input type="checkbox" id="structure" checked> Validar estructura</label>
+    <label class="opt"><input type="checkbox" id="similarity" checked> Similitud query↔respuesta</label>
+    <label class="opt"><input type="checkbox" id="judge"> LLM Judge (lento)</label>
+  </div>
+
+  <button class="run-btn" id="run" onclick="run()">▶ Ejecutar pipeline</button>
+</div>
+
+<div id="output"><div class="empty">Configura las opciones y pulsa <b>Ejecutar pipeline</b>.</div></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function color(v, max=10) {
+  const p = v / max;
+  if (p >= 0.7) return 'var(--green2)';
+  if (p >= 0.5) return 'var(--orange2)';
+  return 'var(--red2)';
+}
+function esc(s){ return (s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function run() {
+  const btn = $('run');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Ejecutando...';
+  $('output').innerHTML = '<div class="empty"><span class="spinner"></span> Corriendo el pipeline, puede tardar según las pruebas elegidas...</div>';
+
+  const body = {
+    question:       $('question').value,
+    rerank:         $('rerank').checked,
+    rerank_method:  $('method').value,
+    run_structure:  $('structure').checked,
+    run_similarity: $('similarity').checked,
+    run_judge:      $('judge').checked,
+  };
+
+  try {
+    const r = await fetch('/eval/pipeline', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + (await r.text()));
+    const data = await r.json();
+    render(data);
+  } catch (e) {
+    $('output').innerHTML = '<div class="empty fail">Error: ' + esc(e.message) + '</div>';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '▶ Ejecutar pipeline';
+  }
+}
+
+function render(data) {
+  const out = $('output');
+  out.innerHTML = '';
+  data.steps.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'step';
+    div.style.animationDelay = (i * 0.08) + 's';
+    div.innerHTML = `
+      <div class="step-head" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display==='none'?'block':'none'">
+        <h3>${esc(s.title)}</h3>
+        <span class="chip">⏱ ${s.elapsed_s}s</span>
+      </div>
+      <div class="step-body">
+        <div class="meta-row">
+          <div class="meta-box"><div class="lbl">Qué hace</div><div class="val">${esc(s.what)}</div></div>
+          <div class="meta-box"><div class="lbl">Por qué mejora la respuesta</div><div class="val">${esc(s.why)}</div></div>
+        </div>
+        ${renderResult(s)}
+      </div>`;
+    out.appendChild(div);
+  });
+}
+
+function renderResult(s) {
+  const r = s.result;
+  switch (s.key) {
+    case 'rewrite': return `
+      <div class="qbox">
+        <div class="qcard"><div class="lbl">Consulta original</div>${esc(r.original)}</div>
+        <div class="arrow">→</div>
+        <div class="qcard" style="border-color:var(--accent)"><div class="lbl">Consulta enriquecida</div>${esc(r.refined)}</div>
+      </div>`;
+
+    case 'retrieval': {
+      const sel = new Set(r.selected.map(x => x.init_rank));
+      let pool = r.pool.map(c => `
+        <tr class="${sel.has(c.init_rank)?'selected':''}">
+          <td class="rank">#${c.init_rank}</td>
+          <td>${c.vector_score ?? '—'}</td>
+          <td>${c.rerank_score ?? '—'}</td>
+          <td style="color:var(--muted)">${esc(c.source)}</td>
+          <td>${esc(c.preview)}…</td>
+        </tr>`).join('');
+      let sels = r.selected.map(c => `
+        <tr class="selected"><td class="rank">#${c.final_rank}</td>
+        <td>antes #${c.init_rank ?? '—'}</td><td>${c.final_score ?? '—'}</td>
+        <td>${esc(c.preview)}…</td></tr>`).join('');
+      return `
+        <div style="margin-bottom:6px"><span class="chip">método: ${esc(r.method)}</span></div>
+        <div class="meta-box"><div class="lbl">Pool de candidatos (verde = seleccionados)</div></div>
+        <table><thead><tr><th>Rank</th><th>Score vector</th><th>Score re-rank</th><th>Fuente</th><th>Fragmento</th></tr></thead>
+        <tbody>${pool}</tbody></table>
+        <div class="meta-box" style="margin-top:14px"><div class="lbl">Selección final (en orden que pasa al LLM)</div></div>
+        <table><thead><tr><th>Rank final</th><th>Rank inicial</th><th>Score</th><th>Fragmento</th></tr></thead>
+        <tbody>${sels}</tbody></table>`;
+    }
+
+    case 'generate': {
+      const rm = r.roadmap;
+      const steps = (rm.steps||[]).map(st => `
+        <div class="rm-step">
+          <span class="lab">${esc(st.label)}</span><span class="typ">${esc(st.type)}</span>
+          <div class="desc">${esc(st.description)}</div>
+          ${(st.key_points||[]).length ? '<ul>'+st.key_points.map(k=>`<li>${esc(k)}</li>`).join('')+'</ul>' : ''}
+        </div>`).join('');
+      return `<div style="font-weight:600;margin-bottom:6px">${esc(rm.title)} <span class="chip">${r.n_steps} pasos</span></div>${steps}`;
+    }
+
+    case 'structure': {
+      const checks = r.checks.map(c => `
+        <div class="check"><span class="ico ${c.passed?'pass':'fail'}">${c.passed?'✓':'✗'}</span>
+        <span><b>${esc(c.name)}</b> — <span style="color:var(--muted)">${esc(c.detail)}</span></span></div>`).join('');
+      return `
+        <div class="bar-wrap"><span class="name">Score estructura</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${r.score*10}%;background:${color(r.score)}"></div></div>
+          <span class="num">${r.score}/10</span>
+          <span class="verdict ${r.verdict==='PASS'?'v-pass':'v-fail'}">${r.verdict}</span></div>
+        <div style="font-size:12px;color:var(--muted);margin:6px 0">${r.passed}/${r.total_checks} chequeos superados</div>
+        ${checks}`;
+    }
+
+    case 'similarity': return `
+      <div class="bar-wrap"><span class="name">TF-IDF (palabras)</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${r.tfidf*100}%;background:var(--orange2)"></div></div>
+        <span class="num">${r.tfidf}</span></div>
+      <div class="bar-wrap"><span class="name">Semántico (embeddings)</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${r.semantic*100}%;background:var(--green2)"></div></div>
+        <span class="num">${r.semantic}</span></div>
+      <div style="font-size:12.5px;color:var(--muted);margin-top:8px">
+        Ganancia semántica vs TF-IDF: <b style="color:var(--green2)">+${r.gain}</b><br>${esc(r.interpretation)}</div>`;
+
+    case 'judge': {
+      const m = r.mese;
+      const bar = (n,v) => `<div class="bar-wrap"><span class="name">${n}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${v*10}%;background:${color(v)}"></div></div>
+        <span class="num">${v}/10</span></div>`;
+      return `
+        ${bar('M — Mapping', m.mapping)}
+        ${bar('E — Exhaustividad', m.exhaustiveness)}
+        ${bar('S — Secuencia', m.sequence)}
+        ${bar('E — Experiencia', m.experience)}
+        <div class="bar-wrap" style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px">
+          <span class="name"><b>MESE compuesto</b></span>
+          <div class="bar-track"><div class="bar-fill" style="width:${m.composite*10}%;background:${color(m.composite)}"></div></div>
+          <span class="num"><b>${m.composite}</b></span></div>
+        <div style="font-size:12.5px;color:var(--muted);margin-top:8px">
+          <b>Secuencia:</b> ${esc(r.sequence_eval.explanation||'')}</div>`;
+    }
+    default: return `<pre style="font-size:11px;color:var(--muted)">${esc(JSON.stringify(r,null,2))}</pre>`;
+  }
+}
+</script>
+</body>
+</html>
