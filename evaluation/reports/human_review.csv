@@ -1,16 +1,46 @@
 ﻿N°,Pregunta,Categoría,Pasos generados (en orden),Pasos esperados,Score MESE,Score Secuencia,Secuencia válida (IA),Pasos fuera de orden (IA),Sugerencia de reorden (IA),Nota Humana Secuencia (0-10),Nota Humana General (0-10),¿Aprobar? (Si/No),Comentarios del Revisor
 1,¿Qué es una llave candidata en bases de datos?,bases_de_datos,"1. Definir el conjunto de atributos candidatos para clave candidata
 2. Verificar la propiedad de unicidad en cada columna candidata
-3. Validar la propiedad de minimalidad en claves compuestas
-4. Crear restricción UNIQUE en la base de datos para cada clave candidata
-5. Diferenciar clave candidata de clave primaria mediante selección explícita
-6. Documentar todas las claves candidatas en el diccionario de datos
-7. [inferido] Validar integridad referencial entre claves candidatas y claves foráneas
-8. Crear índices en claves candidatas para optimizar búsquedas
-9. Implementar validaciones de negocio adicionales en aplicación
-10. Realizar pruebas de violación de clave candidata
-11. Monitorear y auditar cambios en claves candidatas
-12. Documentar decisiones de diseño y evolución de claves candidatas","1. Definir el concepto de llave
+3. Verificar la propiedad de minimalidad del conjunto de atributos
+4. Documentar todas las claves candidatas identificadas
+5. Seleccionar la clave primaria del conjunto de claves candidatas
+6. Definir restricciones UNIQUE para claves alternas
+7. [inferido] Validar dependencias funcionales entre claves candidatas
+8. Implementar índices para optimizar búsquedas por claves candidatas
+9. Documentar diferencias entre clave primaria y claves alternas en el esquema
+10. Validar integridad referencial usando claves candidatas en relaciones
+11. Ejecutar pruebas de unicidad y minimalidad en datos de producción
+12. Documentar decisiones de diseño en especificación técnica final","1. Definir el concepto de llave
 2. Identificar atributos únicos
 3. Verificar minimalidad
-4. Seleccionar llave primaria",8.6,9,Sí,—,Orden correcto,,,,
+4. Seleccionar llave primaria",9.15,10,Sí,—,Orden correcto,,,,
+2,¿Cómo se identifican las llaves candidatas en una tabla?,bases_de_datos,"1. Analizar la estructura de la tabla y documentar atributos potenciales
+2. Verificar la propiedad de no nulidad en cada columna candidata
+3. Verificar la propiedad de unicidad en cada columna candidata
+4. Identificar dependencias funcionales entre atributos
+5. [inferido] Validar la irreductibilidad de claves candidatas compuestas
+6. Comparar claves candidatas identificadas y documentar sus características
+7. Seleccionar la clave primaria entre las candidatas identificadas
+8. Crear índices UNIQUE para claves candidatas no seleccionadas
+9. Validar integridad referencial con claves candidatas en relaciones
+10. Documentar el diccionario de datos con claves candidatas
+11. Ejecutar pruebas de integridad y consistencia de claves candidatas
+12. Revisar y ajustar claves candidatas según evolución del negocio","1. Listar atributos de la tabla
+2. Verificar unicidad por atributo
+3. Verificar minimalidad
+4. Documentar llaves candidatas encontradas",9.35,10,Sí,—,Orden correcto,,,,
+3,¿Cuál es la diferencia entre llave primaria y llave candidata?,bases_de_datos,"1. Identificar todas las columnas candidatas que cumplen unicidad en la tabla
+2. Verificar la propiedad de minimalidad en cada clave candidata identificada
+3. Documentar todas las claves candidatas válidas con sus características de nulabilidad
+4. Seleccionar la clave primaria del conjunto de claves candidatas según criterios de negocio
+5. Implementar la clave primaria con restricción NOT NULL y crear índice asociado
+6. Convertir claves candidatas no seleccionadas en restricciones UNIQUE KEY
+7. [inferido] Definir integridad referencial usando la clave primaria como referencia externa
+8. Validar que la clave primaria no contiene valores duplicados ni nulos en datos existentes
+9. Documentar la diferencia conceptual entre clave primaria y clave candidata en el modelo de datos
+10. Crear índices optimizados en claves candidatas para operaciones de búsqueda frecuentes
+11. Validar restricciones de integridad referencial en cascada desde la clave primaria
+12. Documentar decisiones de diseño y crear matriz de trazabilidad entre claves y restricciones","1. Definir llave candidata
+2. Definir llave primaria
+3. Comparar características
+4. Identificar llaves alternativas",8.6,9,Sí,—,Orden correcto,,,,

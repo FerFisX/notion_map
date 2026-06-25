@@ -6,13 +6,13 @@
         "question": "¿Qué es una llave candidata en bases de datos?",
         "category": "bases_de_datos",
         "ground_truth": "Una llave candidata es un atributo o conjunto mínimo de atributos que identifican de forma única cada tupla en una relación. Puede haber varias llaves candidatas y de ellas se elige la llave primaria.",
-        "answer": "# Roadmap Técnico: Identificación y Validación de Claves Candidatas en Bases de Datos Relacionales\n\n1. [INICIO] Definir el conjunto de atributos candidatos para clave candidata\n   Se identifican todas las columnas o combinaciones de columnas que potencialmente pueden servir como identificadores únicos de cada fila. Este paso es fundamental porque establece el universo de posibles claves candidatas antes de aplicar las propiedades de unicidad y minimalidad. Se debe documentar cada candidato con su justificación de negocio (ej: DNI, Correo Electrónico, Número de Pasaporte en tabla de empleados).\n   • Listar todos los atributos que tienen semántica de identificador único en el dominio del negocio\n   • Considerar combinaciones de columnas (claves compuestas) si ninguna columna individual es única\n   • Documentar la fuente de cada candidato: requisitos funcionales, restricciones legales o reglas de negocio\n   • Ejemplo: En tabla EMPLEADOS, candidatos iniciales = {DNI, Correo_Electrónico, Numero_Empleado, Pasaporte}\n\n2. [PROCESO] Verificar la propiedad de unicidad en cada columna candidata\n   Se comprueba que ningún valor se repite en la columna candidata usando consultas SQL que detecten duplicados. Esta propiedad garantiza que cada fila pueda ser identificada de forma inequívoca sin depender de otras columnas. La ausencia de duplicados es la condición sine qua non para que un atributo sea clave candidata.\n   • Ejecutar: SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1 para cada candidato\n   • Resultado esperado: cero filas retornadas (ningún valor duplicado)\n   • CUIDADO: En PostgreSQL y MySQL, NULL no viola la restricción UNIQUE; múltiples NULLs se permiten. Verificar con: SELECT COUNT(*) FROM tabla WHERE col IS NULL\n   • Si hay duplicados, eliminar ese candidato de la lista de claves candidatas\n   • Herramienta: Ejecutar en cliente SQL nativo (psql, mysql, sqlplus) o IDE como DBeaver, DataGrip\n\n3. [PROCESO] Validar la propiedad de minimalidad en claves compuestas\n   Se verifica que ninguna columna de una clave candidata compuesta pueda ser eliminada sin perder la capacidad de identificar de forma única cada fila. La minimalidad asegura que la clave candidata es el conjunto más pequeño posible de atributos necesarios. Si una subcombinación de columnas ya garantiza unicidad, entonces la combinación completa no es una clave candidata válida.\n   • Para clave compuesta (col1, col2): verificar que col1 sola y col2 sola NO sean únicas\n   • Ejecutar: SELECT col1, COUNT(*) FROM tabla GROUP BY col1 HAVING COUNT(*) > 1 (repetir para col2)\n   • Si col1 o col2 son únicos por sí solos, entonces (col1, col2) NO es clave candidata; usar solo la columna individual\n   • Resultado esperado: ambas subcombinaciones retornan filas duplicadas (COUNT > 1)\n   • Documentar: Clave candidata compuesta = {col1, col2} es MINIMAL porque ambas columnas son necesarias\n\n4. [PROCESO] Crear restricción UNIQUE en la base de datos para cada clave candidata\n   Se implementan restricciones UNIQUE a nivel de motor de base de datos para garantizar que la propiedad de unicidad se mantiene en tiempo de ejecución. Esta restricción previene inserciones o actualizaciones que violarían la unicidad, actuando como un guardián automático del modelo de datos. La restricción debe ser nombrada explícitamente para facilitar auditoría y mantenimiento.\n   • Sintaxis PostgreSQL: ALTER TABLE tabla ADD CONSTRAINT uk_candidata UNIQUE (col1, col2)\n   • Sintaxis MySQL: ALTER TABLE tabla ADD UNIQUE KEY uk_candidata (col1, col2)\n   • Sintaxis SQL Server: ALTER TABLE tabla ADD CONSTRAINT uk_candidata UNIQUE (col1, col2)\n   • Convención de nombres: uk_[nombre_tabla]_[columnas] (ej: uk_empleados_correo)\n   • Verificar creación: SELECT constraint_name FROM information_schema.table_constraints WHERE table_name='tabla' AND constraint_type='UNIQUE'\n\n5. [DECISION] Diferenciar clave candidata de clave primaria mediante selección explícita\n   Se elige una única clave candidata como clave primaria (PRIMARY KEY) según criterios de negocio, mientras que las demás permanecen como claves alternas (ALTERNATE KEYS). La clave primaria es la que se usa principalmente para identificar filas y como referencia en relaciones foráneas, pero todas las claves candidatas son válidas para búsquedas y garantizan unicidad. Esta distinción es crucial en el diseño normalizado porque afecta la estrategia de indexación y las relaciones entre tablas.\n   • Criterios de selección de PK: estabilidad (no cambia en el tiempo), compacidad (pocos bytes), no nulabilidad (NOT NULL obligatorio)\n   • Ejemplo: En EMPLEADOS con candidatas {DNI, Correo_Electrónico}, elegir DNI como PK porque es más estable que correo\n   • Sintaxis: ALTER TABLE tabla ADD CONSTRAINT pk_tabla PRIMARY KEY (col_pk)\n   • Las claves candidatas no seleccionadas como PK se denominan ALTERNATE KEYS y mantienen restricción UNIQUE\n   • Verificar: SELECT constraint_name, constraint_type FROM information_schema.table_constraints WHERE table_name='tabla'\n\n6. [PROCESO] Documentar todas las claves candidatas en el diccionario de datos\n   Se registra formalmente cada clave candidata identificada, incluyendo su composición, propiedades, estado (primaria o alterna) y justificación de negocio. Esta documentación es esencial para la gobernanza del esquema, facilita la comunicación entre equipos de desarrollo y base de datos, y proporciona trazabilidad para auditorías. El diccionario de datos actúa como fuente única de verdad sobre la estructura lógica de la tabla.\n   • Campos obligatorios en registro: nombre_tabla, columnas_clave, tipo_clave (candidata/primaria/alterna), restricción_BD, fecha_creación, propietario\n   • Ejemplo de entrada: EMPLEADOS | {DNI} | PRIMARY KEY | uk_empleados_dni | 2024-10-24 | Arquitectura_BD\n   • Formato recomendado: Tabla en wiki corporativo, documento Confluence, o herramienta de modelado (Erwin, Lucidchart, dbdiagram.io)\n   • Incluir: Justificación de por qué cada candidata es única y minimal, y por qué se eligió la PK\n   • Revisar anualmente: Cambios en reglas de negocio pueden invalidar claves candidatas existentes\n\n7. [PROCESO] [inferido] Validar integridad referencial entre claves candidatas y claves foráneas\n   Se verifica que las claves foráneas (FOREIGN KEYS) que referencian a esta tabla apunten correctamente a la clave primaria o a claves candidatas válidas. Aunque las claves foráneas típicamente referencian la clave primaria, en algunos diseños pueden referenciar claves alternas. Esta validación asegura que no existan referencias huérfanas y que la integridad referencial se mantiene en cascada.\n   • Consulta para listar FKs que referencian la tabla: SELECT constraint_name, table_name, column_name FROM information_schema.referential_constraints WHERE referenced_table_name='tabla'\n   • Verificar que cada FK apunta a una columna que es clave candidata (PK o UNIQUE)\n   • Ejecutar: SELECT * FROM tabla_referenciadora WHERE fk_col NOT IN (SELECT pk_col FROM tabla) para detectar referencias inválidas\n   • Resultado esperado: cero filas (no hay huérfanos)\n   • Configurar ON DELETE/UPDATE CASCADE o RESTRICT según política de negocio\n\n8. [PROCESO] Crear índices en claves candidatas para optimizar búsquedas\n   Se crean índices en todas las claves candidatas para acelerar las operaciones de búsqueda y filtrado. Aunque la restricción UNIQUE ya crea un índice implícito en la mayoría de motores, crear índices explícitos permite optimizar el plan de ejecución de consultas. Los índices en claves candidatas son críticos para el rendimiento en tablas grandes, especialmente cuando se usan en cláusulas WHERE o JOIN.\n   • Sintaxis: CREATE UNIQUE INDEX idx_candidata ON tabla (col1, col2) WHERE col1 IS NOT NULL\n   • Convención: idx_[tabla]_[columnas] (ej: idx_empleados_correo)\n   • Para claves compuestas, considerar orden de columnas según selectividad: columna más selectiva primero\n   • Verificar creación: SELECT indexname FROM pg_indexes WHERE tablename='tabla' (PostgreSQL)\n   • Monitorear: EXPLAIN ANALYZE SELECT * FROM tabla WHERE col1=valor para confirmar uso del índice\n\n9. [PROCESO] Implementar validaciones de negocio adicionales en aplicación\n   Se codifican reglas de validación en la capa de aplicación que complementen las restricciones de base de datos. Aunque la BD garantiza unicidad a nivel técnico, la aplicación debe validar antes de intentar inserciones para proporcionar mensajes de error claros al usuario y evitar rechazos innecesarios. Esta validación dual (BD + aplicación) es una buena práctica de defensa en profundidad.\n   • Validar en aplicación ANTES de INSERT/UPDATE: SELECT COUNT(*) FROM tabla WHERE col=valor AND id!=id_actual\n   • Si COUNT > 0, retornar error: 'El valor de [columna] ya existe en el sistema'\n   • Implementar en ORM (Hibernate, Entity Framework, Sequelize) con anotaciones: @Unique, @UniqueConstraint\n   • Ejemplo Hibernate: @Table(uniqueConstraints = {@UniqueConstraint(columnNames = {\"dni\", \"correo\"})})\n   • Logging: Registrar intentos de violación de unicidad para auditoría y análisis de patrones\n\n10. [PROCESO] Realizar pruebas de violación de clave candidata\n   Se ejecutan casos de prueba que intentan violar deliberadamente las restricciones de unicidad para confirmar que el sistema rechaza correctamente los datos inválidos. Estas pruebas validan que tanto la restricción de BD como la validación de aplicación funcionan como se espera. Las pruebas de violación son críticas para garantizar que el modelo de datos es robusto.\n   • Caso 1: INSERT con valor duplicado en clave candidata → Esperado: ERROR de constraint violation\n   • Caso 2: UPDATE que genera duplicado → Esperado: ERROR de constraint violation\n   • Caso 3: INSERT con NULL en columna de clave candidata (si es permitido) → Esperado: ÉXITO (NULL no viola UNIQUE en la mayoría de motores)\n   • Caso 4: Insertar dos filas con NULL en la misma columna candidata → Esperado: ÉXITO (múltiples NULLs permitidos)\n   • Documentar resultados en matriz de pruebas: Caso | Entrada | Resultado Esperado | Resultado Actual | Estado (PASS/FAIL)\n\n11. [PROCESO] Monitorear y auditar cambios en claves candidatas\n   Se establece un proceso de monitoreo continuo para detectar cambios no autorizados en las restricciones de claves candidatas y para auditar accesos a datos identificados por estas claves. El monitoreo incluye alertas sobre intentos fallidos de violación de unicidad, cambios en definiciones de restricciones y accesos sospechosos. Esta vigilancia es esencial para mantener la integridad del modelo de datos en el tiempo.\n   • Habilitar auditoría de BD: ALTER TABLE tabla ENABLE ROW LEVEL SECURITY (PostgreSQL) o equivalente en tu motor\n   • Crear trigger para registrar intentos de violación: CREATE TRIGGER audit_candidata_violation BEFORE INSERT ON tabla\n   • Monitorear logs: grep 'duplicate key' /var/log/postgresql/postgresql.log (PostgreSQL)\n   • Alertas: Configurar notificaciones si COUNT de violaciones supera umbral (ej: >10 en 1 hora)\n   • Auditoría trimestral: Verificar que restricciones UNIQUE siguen siendo válidas según cambios de negocio\n\n12. [FIN] Documentar decisiones de diseño y evolución de claves candidatas\n   Se registra el historial de decisiones sobre claves candidatas, incluyendo cambios de PK, adiciones de nuevas claves candidatas y razones de deprecación. Esta documentación proporciona trazabilidad completa del diseño del esquema y facilita la comprensión de por qué se tomaron ciertas decisiones. El historial es invaluable para onboarding de nuevos desarrolladores y para análisis de impacto en cambios futuros.\n   • Formato: Tabla de cambios con columnas: Fecha | Tabla | Cambio | Razón | Autor | Versión_Schema\n   • Ejemplo: 2024-10-24 | EMPLEADOS | Agregada clave candidata Pasaporte | Requisito legal INTERPOL | Juan_Pérez | v2.3\n   • Mantener en control de versiones: git commit -m 'Schema v2.3: Add candidate key Pasaporte to EMPLEADOS'\n   • Incluir: Impacto en aplicaciones, migraciones de datos ejecutadas, rollback plan si fue necesario\n   • Revisar antes de cambios mayores: Consultar historial para evitar regresiones o conflictos con decisiones previas\n",
+        "answer": "# Roadmap Técnico: Identificación y Validación de Claves Candidatas en Bases de Datos Relacionales\n\n1. [INICIO] Definir el conjunto de atributos candidatos para clave candidata\n   Se identifican todas las columnas o combinaciones de columnas que potencialmente pueden servir como identificadores únicos de cada fila en la tabla. Este paso es fundamental porque establece el universo de posibles claves candidatas antes de aplicar las propiedades de unicidad y minimalidad. Se debe documentar cada atributo candidato con su tipo de dato, restricciones existentes y justificación del negocio.\n   • Listar todos los atributos con potencial de unicidad: DNI, Email, Número de Pasaporte, Código de Empleado, etc.\n   • Verificar en el diccionario de datos si existen restricciones UNIQUE o índices únicos ya definidos\n   • Documentar la cardinalidad esperada: ¿cuántos valores únicos se esperan vs. total de filas?\n   • Consulta SQL inicial: SELECT COUNT(DISTINCT col1), COUNT(DISTINCT col2) FROM tabla para evaluar diversidad de valores\n\n2. [PROCESO] Verificar la propiedad de unicidad en cada columna candidata\n   Se comprueba que ningún valor se repite en la columna candidata usando la restricción UNIQUE o consultas de validación. Esta propiedad garantiza que cada fila pueda ser identificada de forma inequívoca sin depender de otras columnas. La unicidad es la primera condición obligatoria que debe cumplir cualquier clave candidata según el modelo relacional.\n   • Ejecutar: SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1 para detectar duplicados\n   • CUIDADO: En PostgreSQL y MySQL, múltiples NULL no violan la restricción UNIQUE; en SQL Server sí se permite un NULL\n   • Resultado esperado: cero filas retornadas (sin duplicados)\n   • Validar también valores NULL: SELECT COUNT(*) FROM tabla WHERE col IS NULL para identificar valores faltantes\n\n3. [PROCESO] Verificar la propiedad de minimalidad del conjunto de atributos\n   Se valida que el conjunto de columnas candidatas sea mínimo, es decir, que no se pueda eliminar ninguna columna sin perder la capacidad de identificar de manera única cada fila. La minimalidad es la segunda propiedad obligatoria que diferencia una clave candidata de un simple conjunto de columnas únicas. Si se puede remover una columna y aún mantener la unicidad, entonces el conjunto original no es minimal.\n   • Para claves compuestas (múltiples columnas): verificar que cada subconjunto propio NO sea único\n   • Ejemplo: Si (DNI, Email) es candidata, verificar que DNI solo NO es único y Email solo NO es único\n   • Consulta SQL: SELECT col1, COUNT(*) FROM tabla GROUP BY col1 HAVING COUNT(*) > 1 para cada subconjunto\n   • Resultado esperado: cada subconjunto debe retornar al menos una fila con COUNT(*) > 1 (duplicados)\n\n4. [PROCESO] Documentar todas las claves candidatas identificadas\n   Se registra formalmente cada clave candidata que cumple con unicidad y minimalidad, incluyendo su composición, tipo de dato, restricciones y justificación de negocio. Esta documentación es crítica para la trazabilidad del diseño y facilita decisiones posteriores sobre cuál será la clave primaria. Cada clave candidata debe ser identificable de forma única en la documentación del esquema.\n   • Crear tabla de metadatos: CandidateKey(id, tabla, columnas, tipo_dato, es_compuesta, restricciones_existentes, justificacion)\n   • Ejemplo de registro: (CK_001, empleados, DNI, VARCHAR(10), false, UNIQUE NOT NULL, 'Identificador legal único')\n   • Incluir información de cobertura: ¿qué porcentaje de filas tiene valores no-NULL en esta clave?\n   • Validar que no exista solapamiento de definiciones entre claves candidatas documentadas\n\n5. [DECISION] Seleccionar la clave primaria del conjunto de claves candidatas\n   Se elige una única clave candidata para ser designada como clave primaria (PRIMARY KEY), que será el identificador principal para las operaciones de búsqueda, indexación y referencias externas. La clave primaria debe cumplir criterios adicionales como estabilidad temporal, bajo costo de almacenamiento y frecuencia de uso en consultas. Las demás claves candidatas se designan como claves alternas (alternate keys).\n   • Criterios de selección: estabilidad (no cambia en el tiempo), minimalidad (preferir claves simples sobre compuestas), rendimiento (bajo costo de indexación)\n   • Evitar claves primarias compuestas si existe una clave candidata simple disponible\n   • Considerar el tipo de dato: INTEGER es más eficiente que VARCHAR para índices\n   • Documentar la decisión: PRIMARY KEY (columna) WITH (FILLFACTOR = 90) en SQL Server o equivalente en el motor usado\n\n6. [PROCESO] Definir restricciones UNIQUE para claves alternas\n   Se crean restricciones UNIQUE en la base de datos para cada clave candidata que no fue seleccionada como clave primaria. Estas claves alternas (alternate keys) mantienen la garantía de unicidad a nivel de motor de base de datos, permitiendo búsquedas eficientes y previniendo inserciones duplicadas. Las claves alternas son especialmente útiles en consultas frecuentes que no usan la clave primaria.\n   • Sintaxis SQL: ALTER TABLE empleados ADD CONSTRAINT UQ_empleados_email UNIQUE (email)\n   • Para claves compuestas: ALTER TABLE tabla ADD CONSTRAINT UQ_nombre UNIQUE (col1, col2, col3)\n   • Incluir NOT NULL si es requerido: ALTER TABLE tabla ADD CONSTRAINT UQ_nombre UNIQUE (col1) WHERE col1 IS NOT NULL (SQL Server)\n   • Verificar que el índice UNIQUE se creó: SELECT * FROM sys.indexes WHERE name LIKE 'UQ_%' (SQL Server) o SHOW INDEXES FROM tabla (MySQL)\n\n7. [PROCESO] [inferido] Validar dependencias funcionales entre claves candidatas\n   Se analiza si existe dependencia funcional entre las claves candidatas identificadas, es decir, si el valor de una clave candidata determina unívocamente el valor de otra. Este análisis es importante para detectar redundancias en el diseño y asegurar que cada clave candidata aporta información independiente. Las dependencias funcionales son la base teórica de la normalización en bases de datos.\n   • Ejemplo: Si DNI → Email (DNI determina Email), entonces Email no es realmente independiente como clave candidata\n   • Consulta SQL para detectar: SELECT DNI, COUNT(DISTINCT email) FROM empleados GROUP BY DNI HAVING COUNT(DISTINCT email) > 1\n   • Resultado esperado: cero filas (cada DNI mapea a exactamente un Email)\n   • Documentar las dependencias funcionales encontradas en el diagrama ER o en la especificación de normalización\n\n8. [PROCESO] Implementar índices para optimizar búsquedas por claves candidatas\n   Se crean índices en las claves candidatas (tanto primaria como alternas) para optimizar el rendimiento de consultas que las utilizan como predicados de búsqueda. Los índices aceleran las operaciones SELECT, JOIN y UPDATE que filtran por estas columnas, reduciendo la complejidad de O(n) a O(log n). La estrategia de indexación debe considerar la selectividad de cada clave y la frecuencia de acceso.\n   • Crear índice clustered en clave primaria: CREATE CLUSTERED INDEX PK_empleados ON empleados(id_empleado)\n   • Crear índices non-clustered en claves alternas: CREATE NONCLUSTERED INDEX IX_empleados_email ON empleados(email)\n   • Para claves compuestas, considerar el orden de columnas: CREATE INDEX IX_tabla ON tabla(col1, col2) si las búsquedas usan col1 primero\n   • Monitorear fragmentación: SELECT * FROM sys.dm_db_index_physical_stats() y reorganizar si fragmentación > 30%\n\n9. [PROCESO] Documentar diferencias entre clave primaria y claves alternas en el esquema\n   Se registra explícitamente en la documentación del esquema cuál es la clave primaria, cuáles son las claves alternas, y las razones técnicas de esta selección. Esta documentación es esencial para que otros desarrolladores y arquitectos comprendan la estructura de identificación de la tabla y eviten confusiones sobre qué columna usar en referencias externas. La claridad en esta distinción previene errores de diseño en futuras modificaciones.\n   • Formato de documentación: Tabla: empleados | PK: id_empleado (INT, auto-increment) | AK1: DNI (VARCHAR(10), UNIQUE) | AK2: email (VARCHAR(100), UNIQUE)\n   • Incluir en comentarios SQL: COMMENT ON TABLE empleados IS 'Tabla de empleados. PK: id_empleado. AK: DNI, email'\n   • Especificar en el diccionario de datos: qué clave usar en JOIN (siempre PK), qué clave usar en búsquedas por negocio (AK)\n   • Actualizar diagrama ER: marcar PK con línea sólida, AK con línea punteada o símbolo diferente\n\n10. [PROCESO] Validar integridad referencial usando claves candidatas en relaciones\n   Se verifica que las referencias externas (foreign keys) desde otras tablas apunten correctamente a la clave primaria o a claves alternas, manteniendo la integridad referencial del modelo relacional. Aunque técnicamente se puede referenciar una clave alterna, la mejor práctica es usar siempre la clave primaria para evitar ambigüedades y facilitar el mantenimiento. Esta validación asegura que no existan huérfanos o referencias rotas en la base de datos.\n   • Sintaxis FK a clave primaria: ALTER TABLE pedidos ADD CONSTRAINT FK_pedidos_empleados FOREIGN KEY (id_empleado) REFERENCES empleados(id_empleado)\n   • Consulta para detectar huérfanos: SELECT * FROM pedidos WHERE id_empleado NOT IN (SELECT id_empleado FROM empleados)\n   • Configurar acciones en cascada: ON DELETE CASCADE, ON UPDATE CASCADE según política de negocio\n   • Verificar que la clave referenciada existe: SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME = 'empleados'\n\n11. [PROCESO] Ejecutar pruebas de unicidad y minimalidad en datos de producción\n   Se ejecutan scripts de validación en la base de datos de producción para confirmar que todas las claves candidatas mantienen sus propiedades de unicidad y minimalidad con datos reales. Esta prueba es crítica porque los datos de producción pueden contener patrones no anticipados en el diseño (valores NULL inesperados, duplicados históricos, etc.). Las pruebas deben ejecutarse regularmente como parte del monitoreo de calidad de datos.\n   • Script de validación: SELECT tabla, columna, COUNT(*) as duplicados FROM (SELECT * FROM empleados GROUP BY DNI HAVING COUNT(*) > 1) WHERE duplicados > 0\n   • Ejecutar en horario de bajo uso para no impactar rendimiento\n   • Generar reporte: fecha_ejecución, tabla, clave_candidata, resultado (PASS/FAIL), duplicados_encontrados\n   • Alertar si se encuentran violaciones: enviar notificación a DBA para investigar causa raíz\n\n12. [FIN] Documentar decisiones de diseño en especificación técnica final\n   Se consolida toda la información sobre claves candidatas, clave primaria y claves alternas en la especificación técnica del proyecto, incluyendo justificaciones, alternativas consideradas y decisiones tomadas. Esta documentación final sirve como referencia para auditorías, mantenimiento futuro y capacitación de nuevos desarrolladores. Debe incluir ejemplos concretos, consultas SQL de validación y criterios de aceptación.\n   • Sección en especificación: 'Modelo de Identificación de Entidades' con tabla de claves candidatas, primaria y alternas\n   • Incluir ejemplos de datos: 'Para empleado Juan Pérez: id_empleado=1001 (PK), DNI=12345678 (AK1), email=juan@empresa.com (AK2)'\n   • Documentar restricciones de negocio: 'El DNI no puede cambiar una vez asignado; el email puede cambiar pero debe ser único'\n   • Versionar el documento: especificacion_v2.0_2024-01-15.md con changelog de cambios en claves candidatas\n",
         "contexts": [
           "de manera única cada fila.\n\nUna tabla puede tener varias llaves candidatas. De estas, una se selecciona como\n\nla llave primaria (primary key), que es la que se usa principalmente para\nidentificar de manera única las filas. Las llaves candidatas que no son\nseleccionadas como llaves primarias pueden seguir siendo útiles como llaves\n\nalternativas.\n\nEjemplo:\n\nEn una tabla de empleados:\n\nDNI  y  Correo Electrónico  pueden ser llaves candidatas, ya que ambos pueden\n\nidentificar de manera única a un empleado.\n\nDe estas dos llaves candidatas, se elige una como la llave primaria (por\n\nejemplo,  DNI ).\n\nOctober 24, 2024 1057 AMque es una llave candidata1",
           "que es una llave candidata\n\nit_bambootec\n\nOwner\n\nTags\n\nCreated time\n\nUna llave candidata (o clave candidata) es un conjunto de una o más columnas\nen una tabla de base de datos que puede identificar de manera única cada fila de\nla tabla. Es importante que una llave candidata cumpla dos propiedades clave:\n\n  Unicidad Los valores combinados de las columnas que forman la llave\n\ncandidata deben ser únicos para cada fila en la tabla. Esto asegura que no\nhaya duplicados en las filas.\n\n  Minimalidad La llave candidata debe ser el conjunto mínimo de columnas\n\nnecesario para garantizar la unicidad. Esto significa que no se puede eliminar\nninguna columna de la llave candidata sin perder la capacidad de identificar\n\nde manera única cada fila.",
-          "Simplemente elimina referencias a las\n\ncolumnas; no afecta el tamaño de los\n\ndatos.\n\nFiltra filas según una condición sin\n\ntransformar los valores.\n\nCombina dos o más columnas; su\n\ncomplejidad depende del tamaño de las\n\ncolumnas.\n\nAplicación de funciones sobre las\n\ncolumnas de datos, como cambiar el tipo\n\nde dato.\n\nOrdenar una tabla por una o más\n\ncolumnas.\n\nEliminación de\n\nduplicados\n\nO(n log n)\n\nImplica ordenar los datos antes de eliminar\n\nlos duplicados.\n\nOctober 14, 2024 838 AMcual es la complejidad en tiempo de las operaciones en Power Query1\fGroup By\nAgrupación)\n\nO(n log n)\n\nRequiere ordenar y agrupar según uno o\nmás criterios.\n\nMerge/Join (unión de\ntablas)\n\nO(n log n)  O(n^2)\n\nLa complejidad depende del tipo de unión\n(inner, outer, etc.) y el tamaño de los datos.",
           "cual es la complejidad en tiempo\nde las operaciones en Power\nQuery\n\nAdrian Villarroel\n\nComplejidad\n\nNotación Big-O\n\nDescripción\n\nOwner\n\nTags\n\nCreated time\n\nOperación\n\nAcceso directo a\n\ncolumna\n\nSelección de\n\ncolumnas\n\nO1\n\nO1\n\nRenombrar columnas\n\nO1\n\nEliminación de\n\ncolumnas\n\nFiltro de filas\n\n(condicional)\n\nCombinación de\n\ncolumnas\n\nTransformación de\n\ndatos\n\nO1\n\nO(n)\n\nO(n)\n\nO(n)\n\nOrdenación de filas\n\nO(n log n)\n\nAcceso a un valor específico en una\n\ncolumna sin realizar cálculos adicionales.\n\nSelecciona un subconjunto de columnas\n\nsin realizar transformaciones.\n\nCambia el nombre de una columna sin\n\nmodificar el contenido.\n\nSimplemente elimina referencias a las\n\ncolumnas; no afecta el tamaño de los\n\ndatos.\n\nFiltra filas según una condición sin\n\ntransformar los valores.",
-          "Merge/Join (unión de\ntablas)\n\nO(n log n)  O(n^2)\n\nLa complejidad depende del tipo de unión\n(inner, outer, etc.) y el tamaño de los datos.\n\nPivot Pivoteo)\n\nO(n log n)  O(n^2)\n\nUnpivot Despivot)\n\nO(n log n)  O(n^2)\n\nExpansión de tablas\nanidadas\n\nAplicar funciones\npersonalizadas\n\nO(n^2)\n\nO(n^2)\n\nTransforma las columnas en filas o\nviceversa, reorganizando los datos.\n\nConvierte columnas en filas; es costoso\ncuando se realiza sobre grandes datasets.\n\nExpande datos dentro de columnas que\ncontienen tablas o listas anidadas.\n\nFunciones personalizadas pueden ser\ncostosas si no están optimizadas.\n\ncual es la complejidad en tiempo de las operaciones en Power Query2"
+          "Merge/Join (unión de\ntablas)\n\nO(n log n)  O(n^2)\n\nLa complejidad depende del tipo de unión\n(inner, outer, etc.) y el tamaño de los datos.\n\nPivot Pivoteo)\n\nO(n log n)  O(n^2)\n\nUnpivot Despivot)\n\nO(n log n)  O(n^2)\n\nExpansión de tablas\nanidadas\n\nAplicar funciones\npersonalizadas\n\nO(n^2)\n\nO(n^2)\n\nTransforma las columnas en filas o\nviceversa, reorganizando los datos.\n\nConvierte columnas en filas; es costoso\ncuando se realiza sobre grandes datasets.\n\nExpande datos dentro de columnas que\ncontienen tablas o listas anidadas.\n\nFunciones personalizadas pueden ser\ncostosas si no están optimizadas.\n\ncual es la complejidad en tiempo de las operaciones en Power Query2",
+          "Limitar acciones no permitidas\n\nEstablecer reglas temporales y semánticas claras\n\nEjemplo conceptual:\n\n“Nunca crear un evento sin antes consultar el calendario.ˮ\n\n3.2 Control del contexto y de la memoria\n\nLa memoria del agente debe utilizarse con criterio:\n\nCreación y testeo de flujos con agentes IA en N8N3\fMantener contexto relevante\n\nEvitar estados críticos persistentes\n\nNo depender de memoria para lógica de negocio\n\nLa lógica debe estar en las reglas, no en el recuerdo del agente.\n\n3.3 Manejo de ambigüedad como parte del diseño\n\nUn buen flujo anticipa ambigüedades:\n\nMúltiples eventos con el mismo nombre\n\nFechas implícitas (“mismo díaˮ)\n\nHorarios relativos (“en la tardeˮ)\n\nBuenas prácticas:\n\nDefinir reglas de interpretación\n\nForzar aclaraciones cuando sea necesario"
         ],
         "roadmap": {
           "title": "Roadmap Técnico: Identificación y Validación de Claves Candidatas en Bases de Datos Relacionales",
@@ -20,156 +20,145 @@
             {
               "id": "step_1",
               "label": "Definir el conjunto de atributos candidatos para clave candidata",
-              "description": "Se identifican todas las columnas o combinaciones de columnas que potencialmente pueden servir como identificadores únicos de cada fila. Este paso es fundamental porque establece el universo de posibles claves candidatas antes de aplicar las propiedades de unicidad y minimalidad. Se debe documentar cada candidato con su justificación de negocio (ej: DNI, Correo Electrónico, Número de Pasaporte en tabla de empleados).",
+              "description": "Se identifican todas las columnas o combinaciones de columnas que potencialmente pueden servir como identificadores únicos de cada fila en la tabla. Este paso es fundamental porque establece el universo de posibles claves candidatas antes de aplicar las propiedades de unicidad y minimalidad. Se debe documentar cada atributo candidato con su tipo de dato, restricciones existentes y justificación del negocio.",
               "type": "inicio",
               "key_points": [
-                "Listar todos los atributos que tienen semántica de identificador único en el dominio del negocio",
-                "Considerar combinaciones de columnas (claves compuestas) si ninguna columna individual es única",
-                "Documentar la fuente de cada candidato: requisitos funcionales, restricciones legales o reglas de negocio",
-                "Ejemplo: En tabla EMPLEADOS, candidatos iniciales = {DNI, Correo_Electrónico, Numero_Empleado, Pasaporte}"
+                "Listar todos los atributos con potencial de unicidad: DNI, Email, Número de Pasaporte, Código de Empleado, etc.",
+                "Verificar en el diccionario de datos si existen restricciones UNIQUE o índices únicos ya definidos",
+                "Documentar la cardinalidad esperada: ¿cuántos valores únicos se esperan vs. total de filas?",
+                "Consulta SQL inicial: SELECT COUNT(DISTINCT col1), COUNT(DISTINCT col2) FROM tabla para evaluar diversidad de valores"
               ]
             },
             {
               "id": "step_2",
               "label": "Verificar la propiedad de unicidad en cada columna candidata",
-              "description": "Se comprueba que ningún valor se repite en la columna candidata usando consultas SQL que detecten duplicados. Esta propiedad garantiza que cada fila pueda ser identificada de forma inequívoca sin depender de otras columnas. La ausencia de duplicados es la condición sine qua non para que un atributo sea clave candidata.",
+              "description": "Se comprueba que ningún valor se repite en la columna candidata usando la restricción UNIQUE o consultas de validación. Esta propiedad garantiza que cada fila pueda ser identificada de forma inequívoca sin depender de otras columnas. La unicidad es la primera condición obligatoria que debe cumplir cualquier clave candidata según el modelo relacional.",
               "type": "proceso",
               "key_points": [
-                "Ejecutar: SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1 para cada candidato",
-                "Resultado esperado: cero filas retornadas (ningún valor duplicado)",
-                "CUIDADO: En PostgreSQL y MySQL, NULL no viola la restricción UNIQUE; múltiples NULLs se permiten. Verificar con: SELECT COUNT(*) FROM tabla WHERE col IS NULL",
-                "Si hay duplicados, eliminar ese candidato de la lista de claves candidatas",
-                "Herramienta: Ejecutar en cliente SQL nativo (psql, mysql, sqlplus) o IDE como DBeaver, DataGrip"
+                "Ejecutar: SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1 para detectar duplicados",
+                "CUIDADO: En PostgreSQL y MySQL, múltiples NULL no violan la restricción UNIQUE; en SQL Server sí se permite un NULL",
+                "Resultado esperado: cero filas retornadas (sin duplicados)",
+                "Validar también valores NULL: SELECT COUNT(*) FROM tabla WHERE col IS NULL para identificar valores faltantes"
               ]
             },
             {
               "id": "step_3",
-              "label": "Validar la propiedad de minimalidad en claves compuestas",
-              "description": "Se verifica que ninguna columna de una clave candidata compuesta pueda ser eliminada sin perder la capacidad de identificar de forma única cada fila. La minimalidad asegura que la clave candidata es el conjunto más pequeño posible de atributos necesarios. Si una subcombinación de columnas ya garantiza unicidad, entonces la combinación completa no es una clave candidata válida.",
+              "label": "Verificar la propiedad de minimalidad del conjunto de atributos",
+              "description": "Se valida que el conjunto de columnas candidatas sea mínimo, es decir, que no se pueda eliminar ninguna columna sin perder la capacidad de identificar de manera única cada fila. La minimalidad es la segunda propiedad obligatoria que diferencia una clave candidata de un simple conjunto de columnas únicas. Si se puede remover una columna y aún mantener la unicidad, entonces el conjunto original no es minimal.",
               "type": "proceso",
               "key_points": [
-                "Para clave compuesta (col1, col2): verificar que col1 sola y col2 sola NO sean únicas",
-                "Ejecutar: SELECT col1, COUNT(*) FROM tabla GROUP BY col1 HAVING COUNT(*) > 1 (repetir para col2)",
-                "Si col1 o col2 son únicos por sí solos, entonces (col1, col2) NO es clave candidata; usar solo la columna individual",
-                "Resultado esperado: ambas subcombinaciones retornan filas duplicadas (COUNT > 1)",
-                "Documentar: Clave candidata compuesta = {col1, col2} es MINIMAL porque ambas columnas son necesarias"
+                "Para claves compuestas (múltiples columnas): verificar que cada subconjunto propio NO sea único",
+                "Ejemplo: Si (DNI, Email) es candidata, verificar que DNI solo NO es único y Email solo NO es único",
+                "Consulta SQL: SELECT col1, COUNT(*) FROM tabla GROUP BY col1 HAVING COUNT(*) > 1 para cada subconjunto",
+                "Resultado esperado: cada subconjunto debe retornar al menos una fila con COUNT(*) > 1 (duplicados)"
               ]
             },
             {
               "id": "step_4",
-              "label": "Crear restricción UNIQUE en la base de datos para cada clave candidata",
-              "description": "Se implementan restricciones UNIQUE a nivel de motor de base de datos para garantizar que la propiedad de unicidad se mantiene en tiempo de ejecución. Esta restricción previene inserciones o actualizaciones que violarían la unicidad, actuando como un guardián automático del modelo de datos. La restricción debe ser nombrada explícitamente para facilitar auditoría y mantenimiento.",
+              "label": "Documentar todas las claves candidatas identificadas",
+              "description": "Se registra formalmente cada clave candidata que cumple con unicidad y minimalidad, incluyendo su composición, tipo de dato, restricciones y justificación de negocio. Esta documentación es crítica para la trazabilidad del diseño y facilita decisiones posteriores sobre cuál será la clave primaria. Cada clave candidata debe ser identificable de forma única en la documentación del esquema.",
               "type": "proceso",
               "key_points": [
-                "Sintaxis PostgreSQL: ALTER TABLE tabla ADD CONSTRAINT uk_candidata UNIQUE (col1, col2)",
-                "Sintaxis MySQL: ALTER TABLE tabla ADD UNIQUE KEY uk_candidata (col1, col2)",
-                "Sintaxis SQL Server: ALTER TABLE tabla ADD CONSTRAINT uk_candidata UNIQUE (col1, col2)",
-                "Convención de nombres: uk_[nombre_tabla]_[columnas] (ej: uk_empleados_correo)",
-                "Verificar creación: SELECT constraint_name FROM information_schema.table_constraints WHERE table_name='tabla' AND constraint_type='UNIQUE'"
+                "Crear tabla de metadatos: CandidateKey(id, tabla, columnas, tipo_dato, es_compuesta, restricciones_existentes, justificacion)",
+                "Ejemplo de registro: (CK_001, empleados, DNI, VARCHAR(10), false, UNIQUE NOT NULL, 'Identificador legal único')",
+                "Incluir información de cobertura: ¿qué porcentaje de filas tiene valores no-NULL en esta clave?",
+                "Validar que no exista solapamiento de definiciones entre claves candidatas documentadas"
               ]
             },
             {
               "id": "step_5",
-              "label": "Diferenciar clave candidata de clave primaria mediante selección explícita",
-              "description": "Se elige una única clave candidata como clave primaria (PRIMARY KEY) según criterios de negocio, mientras que las demás permanecen como claves alternas (ALTERNATE KEYS). La clave primaria es la que se usa principalmente para identificar filas y como referencia en relaciones foráneas, pero todas las claves candidatas son válidas para búsquedas y garantizan unicidad. Esta distinción es crucial en el diseño normalizado porque afecta la estrategia de indexación y las relaciones entre tablas.",
+              "label": "Seleccionar la clave primaria del conjunto de claves candidatas",
+              "description": "Se elige una única clave candidata para ser designada como clave primaria (PRIMARY KEY), que será el identificador principal para las operaciones de búsqueda, indexación y referencias externas. La clave primaria debe cumplir criterios adicionales como estabilidad temporal, bajo costo de almacenamiento y frecuencia de uso en consultas. Las demás claves candidatas se designan como claves alternas (alternate keys).",
               "type": "decision",
               "key_points": [
-                "Criterios de selección de PK: estabilidad (no cambia en el tiempo), compacidad (pocos bytes), no nulabilidad (NOT NULL obligatorio)",
-                "Ejemplo: En EMPLEADOS con candidatas {DNI, Correo_Electrónico}, elegir DNI como PK porque es más estable que correo",
-                "Sintaxis: ALTER TABLE tabla ADD CONSTRAINT pk_tabla PRIMARY KEY (col_pk)",
-                "Las claves candidatas no seleccionadas como PK se denominan ALTERNATE KEYS y mantienen restricción UNIQUE",
-                "Verificar: SELECT constraint_name, constraint_type FROM information_schema.table_constraints WHERE table_name='tabla'"
+                "Criterios de selección: estabilidad (no cambia en el tiempo), minimalidad (preferir claves simples sobre compuestas), rendimiento (bajo costo de indexación)",
+                "Evitar claves primarias compuestas si existe una clave candidata simple disponible",
+                "Considerar el tipo de dato: INTEGER es más eficiente que VARCHAR para índices",
+                "Documentar la decisión: PRIMARY KEY (columna) WITH (FILLFACTOR = 90) en SQL Server o equivalente en el motor usado"
               ]
             },
             {
               "id": "step_6",
-              "label": "Documentar todas las claves candidatas en el diccionario de datos",
-              "description": "Se registra formalmente cada clave candidata identificada, incluyendo su composición, propiedades, estado (primaria o alterna) y justificación de negocio. Esta documentación es esencial para la gobernanza del esquema, facilita la comunicación entre equipos de desarrollo y base de datos, y proporciona trazabilidad para auditorías. El diccionario de datos actúa como fuente única de verdad sobre la estructura lógica de la tabla.",
+              "label": "Definir restricciones UNIQUE para claves alternas",
+              "description": "Se crean restricciones UNIQUE en la base de datos para cada clave candidata que no fue seleccionada como clave primaria. Estas claves alternas (alternate keys) mantienen la garantía de unicidad a nivel de motor de base de datos, permitiendo búsquedas eficientes y previniendo inserciones duplicadas. Las claves alternas son especialmente útiles en consultas frecuentes que no usan la clave primaria.",
               "type": "proceso",
               "key_points": [
-                "Campos obligatorios en registro: nombre_tabla, columnas_clave, tipo_clave (candidata/primaria/alterna), restricción_BD, fecha_creación, propietario",
-                "Ejemplo de entrada: EMPLEADOS | {DNI} | PRIMARY KEY | uk_empleados_dni | 2024-10-24 | Arquitectura_BD",
-                "Formato recomendado: Tabla en wiki corporativo, documento Confluence, o herramienta de modelado (Erwin, Lucidchart, dbdiagram.io)",
-                "Incluir: Justificación de por qué cada candidata es única y minimal, y por qué se eligió la PK",
-                "Revisar anualmente: Cambios en reglas de negocio pueden invalidar claves candidatas existentes"
+                "Sintaxis SQL: ALTER TABLE empleados ADD CONSTRAINT UQ_empleados_email UNIQUE (email)",
+                "Para claves compuestas: ALTER TABLE tabla ADD CONSTRAINT UQ_nombre UNIQUE (col1, col2, col3)",
+                "Incluir NOT NULL si es requerido: ALTER TABLE tabla ADD CONSTRAINT UQ_nombre UNIQUE (col1) WHERE col1 IS NOT NULL (SQL Server)",
+                "Verificar que el índice UNIQUE se creó: SELECT * FROM sys.indexes WHERE name LIKE 'UQ_%' (SQL Server) o SHOW INDEXES FROM tabla (MySQL)"
               ]
             },
             {
               "id": "step_7",
-              "label": "[inferido] Validar integridad referencial entre claves candidatas y claves foráneas",
-              "description": "Se verifica que las claves foráneas (FOREIGN KEYS) que referencian a esta tabla apunten correctamente a la clave primaria o a claves candidatas válidas. Aunque las claves foráneas típicamente referencian la clave primaria, en algunos diseños pueden referenciar claves alternas. Esta validación asegura que no existan referencias huérfanas y que la integridad referencial se mantiene en cascada.",
+              "label": "[inferido] Validar dependencias funcionales entre claves candidatas",
+              "description": "Se analiza si existe dependencia funcional entre las claves candidatas identificadas, es decir, si el valor de una clave candidata determina unívocamente el valor de otra. Este análisis es importante para detectar redundancias en el diseño y asegurar que cada clave candidata aporta información independiente. Las dependencias funcionales son la base teórica de la normalización en bases de datos.",
               "type": "proceso",
               "key_points": [
-                "Consulta para listar FKs que referencian la tabla: SELECT constraint_name, table_name, column_name FROM information_schema.referential_constraints WHERE referenced_table_name='tabla'",
-                "Verificar que cada FK apunta a una columna que es clave candidata (PK o UNIQUE)",
-                "Ejecutar: SELECT * FROM tabla_referenciadora WHERE fk_col NOT IN (SELECT pk_col FROM tabla) para detectar referencias inválidas",
-                "Resultado esperado: cero filas (no hay huérfanos)",
-                "Configurar ON DELETE/UPDATE CASCADE o RESTRICT según política de negocio"
+                "Ejemplo: Si DNI → Email (DNI determina Email), entonces Email no es realmente independiente como clave candidata",
+                "Consulta SQL para detectar: SELECT DNI, COUNT(DISTINCT email) FROM empleados GROUP BY DNI HAVING COUNT(DISTINCT email) > 1",
+                "Resultado esperado: cero filas (cada DNI mapea a exactamente un Email)",
+                "Documentar las dependencias funcionales encontradas en el diagrama ER o en la especificación de normalización"
               ]
             },
             {
               "id": "step_8",
-              "label": "Crear índices en claves candidatas para optimizar búsquedas",
-              "description": "Se crean índices en todas las claves candidatas para acelerar las operaciones de búsqueda y filtrado. Aunque la restricción UNIQUE ya crea un índice implícito en la mayoría de motores, crear índices explícitos permite optimizar el plan de ejecución de consultas. Los índices en claves candidatas son críticos para el rendimiento en tablas grandes, especialmente cuando se usan en cláusulas WHERE o JOIN.",
+              "label": "Implementar índices para optimizar búsquedas por claves candidatas",
+              "description": "Se crean índices en las claves candidatas (tanto primaria como alternas) para optimizar el rendimiento de consultas que las utilizan como predicados de búsqueda. Los índices aceleran las operaciones SELECT, JOIN y UPDATE que filtran por estas columnas, reduciendo la complejidad de O(n) a O(log n). La estrategia de indexación debe considerar la selectividad de cada clave y la frecuencia de acceso.",
               "type": "proceso",
               "key_points": [
-                "Sintaxis: CREATE UNIQUE INDEX idx_candidata ON tabla (col1, col2) WHERE col1 IS NOT NULL",
-                "Convención: idx_[tabla]_[columnas] (ej: idx_empleados_correo)",
-                "Para claves compuestas, considerar orden de columnas según selectividad: columna más selectiva primero",
-                "Verificar creación: SELECT indexname FROM pg_indexes WHERE tablename='tabla' (PostgreSQL)",
-                "Monitorear: EXPLAIN ANALYZE SELECT * FROM tabla WHERE col1=valor para confirmar uso del índice"
+                "Crear índice clustered en clave primaria: CREATE CLUSTERED INDEX PK_empleados ON empleados(id_empleado)",
+                "Crear índices non-clustered en claves alternas: CREATE NONCLUSTERED INDEX IX_empleados_email ON empleados(email)",
+                "Para claves compuestas, considerar el orden de columnas: CREATE INDEX IX_tabla ON tabla(col1, col2) si las búsquedas usan col1 primero",
+                "Monitorear fragmentación: SELECT * FROM sys.dm_db_index_physical_stats() y reorganizar si fragmentación > 30%"
               ]
             },
             {
               "id": "step_9",
-              "label": "Implementar validaciones de negocio adicionales en aplicación",
-              "description": "Se codifican reglas de validación en la capa de aplicación que complementen las restricciones de base de datos. Aunque la BD garantiza unicidad a nivel técnico, la aplicación debe validar antes de intentar inserciones para proporcionar mensajes de error claros al usuario y evitar rechazos innecesarios. Esta validación dual (BD + aplicación) es una buena práctica de defensa en profundidad.",
+              "label": "Documentar diferencias entre clave primaria y claves alternas en el esquema",
+              "description": "Se registra explícitamente en la documentación del esquema cuál es la clave primaria, cuáles son las claves alternas, y las razones técnicas de esta selección. Esta documentación es esencial para que otros desarrolladores y arquitectos comprendan la estructura de identificación de la tabla y eviten confusiones sobre qué columna usar en referencias externas. La claridad en esta distinción previene errores de diseño en futuras modificaciones.",
               "type": "proceso",
               "key_points": [
-                "Validar en aplicación ANTES de INSERT/UPDATE: SELECT COUNT(*) FROM tabla WHERE col=valor AND id!=id_actual",
-                "Si COUNT > 0, retornar error: 'El valor de [columna] ya existe en el sistema'",
-                "Implementar en ORM (Hibernate, Entity Framework, Sequelize) con anotaciones: @Unique, @UniqueConstraint",
-                "Ejemplo Hibernate: @Table(uniqueConstraints = {@UniqueConstraint(columnNames = {\"dni\", \"correo\"})})",
-                "Logging: Registrar intentos de violación de unicidad para auditoría y análisis de patrones"
+                "Formato de documentación: Tabla: empleados | PK: id_empleado (INT, auto-increment) | AK1: DNI (VARCHAR(10), UNIQUE) | AK2: email (VARCHAR(100), UNIQUE)",
+                "Incluir en comentarios SQL: COMMENT ON TABLE empleados IS 'Tabla de empleados. PK: id_empleado. AK: DNI, email'",
+                "Especificar en el diccionario de datos: qué clave usar en JOIN (siempre PK), qué clave usar en búsquedas por negocio (AK)",
+                "Actualizar diagrama ER: marcar PK con línea sólida, AK con línea punteada o símbolo diferente"
               ]
             },
             {
               "id": "step_10",
-              "label": "Realizar pruebas de violación de clave candidata",
-              "description": "Se ejecutan casos de prueba que intentan violar deliberadamente las restricciones de unicidad para confirmar que el sistema rechaza correctamente los datos inválidos. Estas pruebas validan que tanto la restricción de BD como la validación de aplicación funcionan como se espera. Las pruebas de violación son críticas para garantizar que el modelo de datos es robusto.",
+              "label": "Validar integridad referencial usando claves candidatas en relaciones",
+              "description": "Se verifica que las referencias externas (foreign keys) desde otras tablas apunten correctamente a la clave primaria o a claves alternas, manteniendo la integridad referencial del modelo relacional. Aunque técnicamente se puede referenciar una clave alterna, la mejor práctica es usar siempre la clave primaria para evitar ambigüedades y facilitar el mantenimiento. Esta validación asegura que no existan huérfanos o referencias rotas en la base de datos.",
               "type": "proceso",
               "key_points": [
-                "Caso 1: INSERT con valor duplicado en clave candidata → Esperado: ERROR de constraint violation",
-                "Caso 2: UPDATE que genera duplicado → Esperado: ERROR de constraint violation",
-                "Caso 3: INSERT con NULL en columna de clave candidata (si es permitido) → Esperado: ÉXITO (NULL no viola UNIQUE en la mayoría de motores)",
-                "Caso 4: Insertar dos filas con NULL en la misma columna candidata → Esperado: ÉXITO (múltiples NULLs permitidos)",
-                "Documentar resultados en matriz de pruebas: Caso | Entrada | Resultado Esperado | Resultado Actual | Estado (PASS/FAIL)"
+                "Sintaxis FK a clave primaria: ALTER TABLE pedidos ADD CONSTRAINT FK_pedidos_empleados FOREIGN KEY (id_empleado) REFERENCES empleados(id_empleado)",
+                "Consulta para detectar huérfanos: SELECT * FROM pedidos WHERE id_empleado NOT IN (SELECT id_empleado FROM empleados)",
+                "Configurar acciones en cascada: ON DELETE CASCADE, ON UPDATE CASCADE según política de negocio",
+                "Verificar que la clave referenciada existe: SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME = 'empleados'"
               ]
             },
             {
               "id": "step_11",
-              "label": "Monitorear y auditar cambios en claves candidatas",
-              "description": "Se establece un proceso de monitoreo continuo para detectar cambios no autorizados en las restricciones de claves candidatas y para auditar accesos a datos identificados por estas claves. El monitoreo incluye alertas sobre intentos fallidos de violación de unicidad, cambios en definiciones de restricciones y accesos sospechosos. Esta vigilancia es esencial para mantener la integridad del modelo de datos en el tiempo.",
+              "label": "Ejecutar pruebas de unicidad y minimalidad en datos de producción",
+              "description": "Se ejecutan scripts de validación en la base de datos de producción para confirmar que todas las claves candidatas mantienen sus propiedades de unicidad y minimalidad con datos reales. Esta prueba es crítica porque los datos de producción pueden contener patrones no anticipados en el diseño (valores NULL inesperados, duplicados históricos, etc.). Las pruebas deben ejecutarse regularmente como parte del monitoreo de calidad de datos.",
               "type": "proceso",
               "key_points": [
-                "Habilitar auditoría de BD: ALTER TABLE tabla ENABLE ROW LEVEL SECURITY (PostgreSQL) o equivalente en tu motor",
-                "Crear trigger para registrar intentos de violación: CREATE TRIGGER audit_candidata_violation BEFORE INSERT ON tabla",
-                "Monitorear logs: grep 'duplicate key' /var/log/postgresql/postgresql.log (PostgreSQL)",
-                "Alertas: Configurar notificaciones si COUNT de violaciones supera umbral (ej: >10 en 1 hora)",
-                "Auditoría trimestral: Verificar que restricciones UNIQUE siguen siendo válidas según cambios de negocio"
+                "Script de validación: SELECT tabla, columna, COUNT(*) as duplicados FROM (SELECT * FROM empleados GROUP BY DNI HAVING COUNT(*) > 1) WHERE duplicados > 0",
+                "Ejecutar en horario de bajo uso para no impactar rendimiento",
+                "Generar reporte: fecha_ejecución, tabla, clave_candidata, resultado (PASS/FAIL), duplicados_encontrados",
+                "Alertar si se encuentran violaciones: enviar notificación a DBA para investigar causa raíz"
               ]
             },
             {
               "id": "step_12",
-              "label": "Documentar decisiones de diseño y evolución de claves candidatas",
-              "description": "Se registra el historial de decisiones sobre claves candidatas, incluyendo cambios de PK, adiciones de nuevas claves candidatas y razones de deprecación. Esta documentación proporciona trazabilidad completa del diseño del esquema y facilita la comprensión de por qué se tomaron ciertas decisiones. El historial es invaluable para onboarding de nuevos desarrolladores y para análisis de impacto en cambios futuros.",
+              "label": "Documentar decisiones de diseño en especificación técnica final",
+              "description": "Se consolida toda la información sobre claves candidatas, clave primaria y claves alternas en la especificación técnica del proyecto, incluyendo justificaciones, alternativas consideradas y decisiones tomadas. Esta documentación final sirve como referencia para auditorías, mantenimiento futuro y capacitación de nuevos desarrolladores. Debe incluir ejemplos concretos, consultas SQL de validación y criterios de aceptación.",
               "type": "fin",
               "key_points": [
-                "Formato: Tabla de cambios con columnas: Fecha | Tabla | Cambio | Razón | Autor | Versión_Schema",
-                "Ejemplo: 2024-10-24 | EMPLEADOS | Agregada clave candidata Pasaporte | Requisito legal INTERPOL | Juan_Pérez | v2.3",
-                "Mantener en control de versiones: git commit -m 'Schema v2.3: Add candidate key Pasaporte to EMPLEADOS'",
-                "Incluir: Impacto en aplicaciones, migraciones de datos ejecutadas, rollback plan si fue necesario",
-                "Revisar antes de cambios mayores: Consultar historial para evitar regresiones o conflictos con decisiones previas"
+                "Sección en especificación: 'Modelo de Identificación de Entidades' con tabla de claves candidatas, primaria y alternas",
+                "Incluir ejemplos de datos: 'Para empleado Juan Pérez: id_empleado=1001 (PK), DNI=12345678 (AK1), email=juan@empresa.com (AK2)'",
+                "Documentar restricciones de negocio: 'El DNI no puede cambiar una vez asignado; el email puede cambiar pero debe ser único'",
+                "Versionar el documento: especificacion_v2.0_2024-01-15.md con changelog de cambios en claves candidatas"
               ]
             }
           ]
@@ -177,16 +166,16 @@
         "steps": [
           "Definir el conjunto de atributos candidatos para clave candidata",
           "Verificar la propiedad de unicidad en cada columna candidata",
-          "Validar la propiedad de minimalidad en claves compuestas",
-          "Crear restricción UNIQUE en la base de datos para cada clave candidata",
-          "Diferenciar clave candidata de clave primaria mediante selección explícita",
-          "Documentar todas las claves candidatas en el diccionario de datos",
-          "[inferido] Validar integridad referencial entre claves candidatas y claves foráneas",
-          "Crear índices en claves candidatas para optimizar búsquedas",
-          "Implementar validaciones de negocio adicionales en aplicación",
-          "Realizar pruebas de violación de clave candidata",
-          "Monitorear y auditar cambios en claves candidatas",
-          "Documentar decisiones de diseño y evolución de claves candidatas"
+          "Verificar la propiedad de minimalidad del conjunto de atributos",
+          "Documentar todas las claves candidatas identificadas",
+          "Seleccionar la clave primaria del conjunto de claves candidatas",
+          "Definir restricciones UNIQUE para claves alternas",
+          "[inferido] Validar dependencias funcionales entre claves candidatas",
+          "Implementar índices para optimizar búsquedas por claves candidatas",
+          "Documentar diferencias entre clave primaria y claves alternas en el esquema",
+          "Validar integridad referencial usando claves candidatas en relaciones",
+          "Ejecutar pruebas de unicidad y minimalidad en datos de producción",
+          "Documentar decisiones de diseño en especificación técnica final"
         ],
         "expected_steps": [
           "Definir el concepto de llave",
@@ -197,43 +186,43 @@
         "classic": {
           "relevance": {
             "score": 9,
-            "justification": "El contexto RAG proporciona una definición clara y directa de llave candidata. La respuesta esperada se alinea perfectamente con el contenido recuperado que explica unicidad, minimalidad y la relación con llave primaria."
+            "justification": "El roadmap responde directamente a la pregunta sobre qué es una llave candidata. Los primeros pasos definen claramente el concepto (atributos que identifican de forma única) y luego profundiza en sus propiedades (unicidad y minimalidad). El contexto RAG se integra perfectamente en los pasos 2 y 3."
           },
           "completeness": {
             "score": 8,
-            "justification": "El roadmap cubre los aspectos esenciales: definición de candidatos, verificación de unicidad, validación de minimalidad, creación de restricciones, diferenciación de llave primaria, documentación e indexación. Incluye 12 pasos que cubren el ciclo completo de identificación y gestión."
+            "justification": "Cubre los aspectos esenciales: definición, propiedades (unicidad y minimalidad), identificación, selección de primaria, y validación. Incluye pasos avanzados como índices e integridad referencial. Podría mejorar con ejemplos prácticos más explícitos en cada paso."
           },
           "coherence": {
             "score": 9,
-            "justification": "Los pasos siguen una secuencia lógica: identificación → validación de propiedades → implementación en BD → documentación → monitoreo. Cada fase depende naturalmente de la anterior sin saltos conceptuales."
+            "justification": "El orden es lógico: primero definir candidatos, luego validar propiedades, documentar, seleccionar primaria, implementar restricciones, optimizar e integrar. Cada paso depende naturalmente del anterior sin saltos conceptuales."
           },
           "technical_accuracy": {
             "score": 9,
-            "justification": "Los detalles técnicos son correctos: consultas SQL con GROUP BY HAVING, consideración de NULLs en PostgreSQL/MySQL, verificación de minimalidad en claves compuestas, creación de índices. La nota sobre NULLs múltiples en restricciones UNIQUE es precisa."
+            "justification": "Los detalles técnicos son correctos: menciona restricciones UNIQUE, consultas SQL válidas, diferencias entre motores (PostgreSQL, MySQL, SQL Server con NULLs), índices y dependencias funcionales. La única imprecisión menor es que el paso 3 está truncado en el contexto proporcionado."
           },
           "context_fidelity": {
             "score": 9,
-            "justification": "El roadmap se basa fielmente en el contexto RAG: retoma el ejemplo de DNI y Correo Electrónico, explica unicidad y minimalidad como propiedades clave, menciona la selección de llave primaria. No inventa conceptos fuera del contexto proporcionado."
+            "justification": "Se basa fielmente en el contexto RAG: utiliza el ejemplo DNI/Email, explica unicidad y minimalidad como propiedades clave, menciona la selección de llave primaria. No inventa datos; todo está fundamentado en la documentación proporcionada."
           },
-          "summary": "El roadmap es técnicamente sólido, relevante y coherente. Proporciona una guía práctica y completa para identificar y validar llaves candidatas, con detalles específicos sobre implementación en SQL y consideraciones de diseño de bases de datos."
+          "summary": "El roadmap es altamente relevante, técnicamente preciso y coherentemente ordenado. Responde la pregunta de forma completa integrando definición, propiedades y validación. La estructura permite tanto comprensión conceptual como implementación práctica."
         },
         "sequence_eval": {
-          "score": 9,
+          "score": 10,
           "is_valid": true,
           "out_of_order_steps": [],
           "suggested_fix": "Orden correcto",
-          "explanation": "Las dependencias causales están bien ordenadas: (1) identificar candidatos → (2) verificar unicidad → (3) validar minimalidad → (4) crear restricciones → (5) diferenciar primaria → (6) documentar → (7) validar integridad referencial → (8) crear índices → (9) validaciones de negocio → (10) pruebas → (11) monitoreo → (12) documentación de evolución. Cada paso requiere el resultado del anterior sin violaciones."
+          "explanation": "Las dependencias causales son válidas: (1) definir candidatos → (2) verificar unicidad → (3) verificar minimalidad → (4) documentar → (5) seleccionar primaria → (6) definir restricciones → (7) validar dependencias → (8) implementar índices → (9) documentar diferencias → (10) validar integridad referencial → (11) pruebas en producción → (12) especificación final. Cada paso requiere el resultado del anterior sin violaciones."
         },
         "mese": {
           "mapping": 9,
-          "mapping_justification": "Todos los pasos contienen información factualmente correcta según el contexto RAG. Las propiedades de unicidad y minimalidad se describen con precisión. Las consultas SQL y consideraciones de NULL son técnicamente válidas. No hay afirmaciones contradictorias con el contexto.",
+          "mapping_justification": "Contenido factualmente correcto: define llave candidata como conjunto mínimo de atributos con unicidad, explica propiedades según teoría relacional, menciona restricciones SQL válidas y diferencias entre motores. No hay afirmaciones falsas detectadas.",
           "exhaustiveness": 8,
-          "exhaustiveness_justification": "El roadmap cubre los pasos esenciales para el ciclo completo de llaves candidatas. Podría añadirse un paso explícito sobre 'Resolver conflictos entre múltiples candidatos' o 'Considerar claves naturales vs. subrogadas', pero la cobertura es sustancial y práctica.",
-          "sequence": 9,
-          "sequence_justification": "No hay violaciones de dependencia causal. Cada paso i no depende de resultados del paso j donde j > i. La progresión de identificación → validación → implementación → documentación → monitoreo es lógicamente correcta.",
-          "experience": 8,
-          "experience_justification": "La mayoría de pasos son accionables y específicos (ej: 'Ejecutar SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1'). El paso 3 sobre minimalidad es algo denso pero incluye instrucciones claras. Paso 9 sobre 'validaciones de negocio adicionales' es ligeramente vago pero contextualmente comprensible.",
-          "composite": 8.6
+          "exhaustiveness_justification": "Cubre pasos esenciales: definición, validación de propiedades, selección de primaria, restricciones, índices e integridad referencial. Pasos potencialmente faltantes: manejo de claves compuestas complejas, migración de esquemas existentes, o tratamiento de claves naturales vs. subrogadas.",
+          "sequence": 10,
+          "sequence_justification": "Dependencias causales correctas sin violaciones. Cada paso i no depende de pasos posteriores j>i. La secuencia respeta el flujo lógico de diseño, validación e implementación.",
+          "experience": 9,
+          "experience_justification": "Pasos accionables y específicos: incluye consultas SQL exactas, menciona herramientas (diccionario de datos, restricciones UNIQUE), proporciona ejemplos concretos (DNI, Email). Claridad alta; usuario puede ejecutar cada paso sin ambigüedad. Mejora menor: algunos pasos podrían incluir más ejemplos de código.",
+          "composite": 9.15
         },
         "structure": {
           "score": 9.14,
@@ -299,7 +288,7 @@
             {
               "name": "label_action_verb",
               "passed": false,
-              "detail": "Sin verbo de acción: ['Diferenciar clave candidata de clave primaria mediante selec', '[inferido] Validar integridad referencial entre claves candi', 'Realizar pruebas de violación de clave candidata']",
+              "detail": "Sin verbo de acción: ['[inferido] Validar dependencias funcionales entre claves can']",
               "weight": 1.2
             },
             {
@@ -316,54 +305,703 @@
             }
           ],
           "violations": [
-            "Sin verbo de acción: ['Diferenciar clave candidata de clave primaria mediante selec', '[inferido] Validar integridad referencial entre claves candi', 'Realizar pruebas de violación de clave candidata']"
+            "Sin verbo de acción: ['[inferido] Validar dependencias funcionales entre claves can']"
           ]
         },
         "similarity": {
-          "tfidf": 0.3571,
-          "semantic": 0.6322,
-          "semantic_0_10": 6.32,
-          "gain": 0.2751,
+          "tfidf": 0.3243,
+          "semantic": 0.6705,
+          "semantic_0_10": 6.71,
+          "gain": 0.3462,
           "interpretation": "Alta relevancia — la respuesta aborda directamente la pregunta"
         },
-        "response_time": 35.77,
+        "response_time": 33.07,
         "overall_score": 8.8,
+        "verdict": "PASS",
+        "mese_verdict": "PASS"
+      },
+      {
+        "question": "¿Cómo se identifican las llaves candidatas en una tabla?",
+        "category": "bases_de_datos",
+        "ground_truth": "Se deben encontrar todos los conjuntos de atributos que cumplan unicidad (no hay dos filas iguales) y minimalidad (no sobra ningún atributo). Se analiza la dependencia funcional entre columnas.",
+        "answer": "# Proceso técnico para identificar y validar claves candidatas en tablas de bases de datos relacionales\n\n1. [INICIO] Analizar la estructura de la tabla y documentar atributos potenciales\n   Se realiza un inventario completo de todas las columnas de la tabla, clasificándolas por tipo de dato, restricciones existentes y semántica del negocio. Este análisis inicial es fundamental para identificar qué atributos tienen potencial de ser claves candidatas, ya que solo aquellos que pueden identificar de manera única cada fila son candidatos válidos. Se documentan los atributos que por su naturaleza (DNI, email, número de serie, código único) tienen características de identificadores naturales.\n   • Ejecutar: SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'nombre_tabla'\n   • Identificar atributos con semántica de identificador único (DNI, email, código, matrícula, IBAN)\n   • Documentar restricciones existentes: UNIQUE, PRIMARY KEY, FOREIGN KEY\n   • Clasificar columnas por cardinalidad esperada (baja, media, alta)\n\n2. [PROCESO] Verificar la propiedad de no nulidad en cada columna candidata\n   Se valida que la columna candidata no contenga valores NULL, ya que una clave candidata debe poder identificar de manera única cada fila sin excepciones. Una columna con valores NULL no puede ser clave candidata porque NULL no es comparable con otros valores y viola el principio de unicidad absoluta. Se ejecuta una consulta que cuenta registros nulos para cada columna potencial.\n   • Ejecutar: SELECT COUNT(*) as nulos FROM tabla WHERE columna_candidata IS NULL\n   • Resultado esperado: 0 registros nulos (si hay nulos, la columna NO es candidata)\n   • Verificar en el esquema: ALTER TABLE tabla MODIFY columna_candidata NOT NULL (si aplica)\n   • CUIDADO: En algunas bases de datos (PostgreSQL, MySQL), NULL no viola restricción UNIQUE, pero sigue siendo inválido para clave candidata\n\n3. [PROCESO] Verificar la propiedad de unicidad en cada columna candidata\n   Se comprueba que ningún valor se repite en la columna candidata, garantizando que cada fila pueda ser identificada de forma inequívoca sin depender de otras columnas. Esta es la propiedad más crítica de una clave candidata: la capacidad de distinguir cada registro de los demás de manera única. Se ejecutan consultas de agrupación para detectar duplicados.\n   • Ejecutar: SELECT columna_candidata, COUNT(*) as frecuencia FROM tabla GROUP BY columna_candidata HAVING COUNT(*) > 1\n   • Resultado esperado: cero filas (si hay resultados, existen duplicados y la columna NO es candidata)\n   • Alternativa: SELECT COUNT(DISTINCT columna_candidata) FROM tabla debe ser igual a SELECT COUNT(*) FROM tabla\n   • Aplicar restricción: ALTER TABLE tabla ADD CONSTRAINT uk_columna UNIQUE (columna_candidata)\n\n4. [PROCESO] Identificar dependencias funcionales entre atributos\n   Se analiza si existen dependencias funcionales donde un conjunto de columnas determina de manera única a otro conjunto de columnas. Una clave candidata compuesta puede estar formada por múltiples atributos que juntos identifican de forma única cada fila, aunque individualmente no lo hagan. Este análisis es esencial para descubrir claves candidatas que no son obvias a nivel de columna individual.\n   • Ejecutar análisis: SELECT col1, col2, COUNT(*) FROM tabla GROUP BY col1, col2 HAVING COUNT(*) > 1 (para claves compuestas)\n   • Documentar: Si (col1, col2) determina únicamente a col3, entonces col3 depende funcionalmente de (col1, col2)\n   • Verificar que no exista dependencia circular o redundante entre candidatas\n   • Ejemplo: En tabla empleados, (departamento, numero_empleado) puede ser clave candidata aunque individualmente no lo sean\n\n5. [PROCESO] [inferido] Validar la irreductibilidad de claves candidatas compuestas\n   Se verifica que ningún subconjunto de una clave candidata compuesta sea también una clave candidata, asegurando que la clave es minimal. Una clave candidata debe ser irreducible: si se elimina cualquier atributo de ella, deja de ser clave candidata. Este principio evita redundancia y garantiza que se ha identificado la clave más eficiente.\n   • Para clave compuesta (col1, col2, col3): verificar que (col1, col2), (col1, col3) y (col2, col3) NO sean claves candidatas\n   • Ejecutar: SELECT col1, col2, COUNT(*) FROM tabla GROUP BY col1, col2 HAVING COUNT(*) > 1 (si hay resultados, col3 es redundante)\n   • Resultado esperado: cada subconjunto debe tener duplicados\n   • Documentar: La clave candidata es (col1, col2, col3) y no puede reducirse\n\n6. [PROCESO] Comparar claves candidatas identificadas y documentar sus características\n   Se realiza un análisis comparativo de todas las claves candidatas encontradas, evaluando su estabilidad, tamaño, tipo de dato y frecuencia de cambio. Según el contexto del negocio, una tabla puede tener múltiples claves candidatas válidas (como DNI y Correo Electrónico en empleados), y es necesario documentar todas para facilitar la selección de la clave primaria. Se crea una matriz de comparación con criterios técnicos y de negocio.\n   • Crear tabla comparativa: Candidata | Tipo | Tamaño | Estabilidad | Frecuencia_Cambio | Índice_Existente\n   • Evaluar estabilidad: ¿El valor cambia frecuentemente? (DNI es estable, email puede cambiar)\n   • Verificar si ya existen índices: SELECT * FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_NAME = 'tabla'\n   • Documentar: Candidata1 (DNI): 9 bytes, estable, sin cambios | Candidata2 (Email): 255 bytes, inestable, cambios frecuentes\n\n7. [DECISION] Seleccionar la clave primaria entre las candidatas identificadas\n   Se elige una de las claves candidatas como clave primaria (primary key) basándose en criterios técnicos y de negocio. La clave primaria será la que se use principalmente para identificar de manera única las filas y para crear índices de búsqueda rápida. Los criterios de selección incluyen: tamaño mínimo, estabilidad máxima, frecuencia de uso en consultas y naturalidad del identificador.\n   • Criterios de selección: (1) Tamaño mínimo, (2) Máxima estabilidad, (3) Máxima frecuencia de uso en WHERE/JOIN, (4) Tipo de dato numérico preferible\n   • Ejecutar: ALTER TABLE tabla ADD PRIMARY KEY (columna_seleccionada)\n   • Verificar: SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'tabla' AND CONSTRAINT_TYPE = 'PRIMARY KEY'\n   • Ejemplo: En empleados, elegir DNI como PK (9 bytes, estable) sobre Email (255 bytes, inestable)\n\n8. [PROCESO] Crear índices UNIQUE para claves candidatas no seleccionadas\n   Se crean restricciones UNIQUE e índices para las claves candidatas que no fueron seleccionadas como clave primaria, permitiendo que sigan siendo útiles como claves alternativas. Estos índices garantizan la unicidad sin ser la clave principal, y permiten búsquedas rápidas por estos atributos alternativos. Las claves alternativas son críticas para mantener la integridad referencial y optimizar consultas.\n   • Ejecutar para cada candidata no seleccionada: ALTER TABLE tabla ADD CONSTRAINT uk_candidata UNIQUE (columna_candidata)\n   • Crear índice: CREATE UNIQUE INDEX idx_candidata ON tabla (columna_candidata)\n   • Verificar: SELECT * FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_NAME = 'tabla' AND NON_UNIQUE = 0\n   • Resultado esperado: Un índice PRIMARY KEY + N índices UNIQUE (uno por cada clave alternativa)\n\n9. [PROCESO] Validar integridad referencial con claves candidatas en relaciones\n   Se verifica que las claves candidatas (primaria y alternativas) sean correctamente referenciadas por claves foráneas en otras tablas. Las relaciones entre tablas deben apuntar a claves candidatas válidas para mantener la integridad referencial. Se auditan todas las FOREIGN KEY que apunten a la tabla actual para asegurar que referencian claves candidatas válidas.\n   • Ejecutar: SELECT CONSTRAINT_NAME, TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME = 'tabla'\n   • Verificar que REFERENCED_COLUMN_NAME sea una clave candidata (PK o UNIQUE)\n   • Validar: SELECT COUNT(*) FROM tabla_referenciadora WHERE clave_foranea NOT IN (SELECT clave_candidata FROM tabla)\n   • Resultado esperado: cero filas huérfanas (integridad referencial válida)\n\n10. [PROCESO] Documentar el diccionario de datos con claves candidatas\n   Se registra en el diccionario de datos de la organización la identificación completa de todas las claves candidatas, incluyendo su definición, propiedades, restricciones y justificación de selección. Esta documentación es esencial para que otros desarrolladores, analistas y administradores de bases de datos comprendan la estructura de identificación de la tabla y puedan tomar decisiones informadas sobre su uso.\n   • Documentar por cada candidata: Nombre | Tipo | Composición | Unicidad | Nulidad | Estabilidad | Rol (PK/Alternativa) | Justificación\n   • Ejemplo: DNI | VARCHAR(9) | Simple | Sí | No | Alta | PK | Identificador natural estable del empleado\n   • Incluir: Restricciones SQL aplicadas, índices creados, relaciones que la referencian\n   • Almacenar en: Wiki técnica, repositorio de esquemas, o herramienta de gobernanza de datos\n\n11. [PROCESO] Ejecutar pruebas de integridad y consistencia de claves candidatas\n   Se realizan pruebas automatizadas para verificar que las claves candidatas mantienen sus propiedades de unicidad y no nulidad en el tiempo, especialmente después de operaciones de inserción, actualización o eliminación. Estas pruebas garantizan que la identificación de claves candidatas es correcta y que las restricciones se mantienen bajo carga operativa.\n   • Test 1 - Inserción duplicada: INSERT INTO tabla (clave_candidata, ...) VALUES ('valor_existente', ...) debe fallar con error UNIQUE\n   • Test 2 - Inserción nula: INSERT INTO tabla (clave_candidata, ...) VALUES (NULL, ...) debe fallar con error NOT NULL\n   • Test 3 - Actualización duplicada: UPDATE tabla SET clave_candidata = 'valor_existente' WHERE id = X debe fallar\n   • Test 4 - Consulta de performance: SELECT * FROM tabla WHERE clave_candidata = 'valor' debe usar índice (EXPLAIN PLAN)\n\n12. [FIN] Revisar y ajustar claves candidatas según evolución del negocio\n   Se establece un proceso de revisión periódica de las claves candidatas identificadas para asegurar que siguen siendo válidas conforme el negocio evoluciona. Cambios en los requisitos, nuevos atributos, o modificaciones en la semántica del dominio pueden afectar la validez de una clave candidata. Se documenta un plan de auditoría trimestral o anual.\n   • Revisar anualmente: ¿Siguen siendo únicos los valores de la clave candidata? ¿Ha cambiado la semántica del atributo?\n   • Ejecutar: SELECT columna_candidata, COUNT(*) FROM tabla GROUP BY columna_candidata HAVING COUNT(*) > 1 (detección de nuevos duplicados)\n   • Evaluar nuevos atributos: ¿Existen nuevas columnas que podrían ser claves candidatas?\n   • Documentar cambios: Mantener histórico de decisiones y justificaciones en el diccionario de datos\n",
+        "contexts": [
+          "de manera única cada fila.\n\nUna tabla puede tener varias llaves candidatas. De estas, una se selecciona como\n\nla llave primaria (primary key), que es la que se usa principalmente para\nidentificar de manera única las filas. Las llaves candidatas que no son\nseleccionadas como llaves primarias pueden seguir siendo útiles como llaves\n\nalternativas.\n\nEjemplo:\n\nEn una tabla de empleados:\n\nDNI  y  Correo Electrónico  pueden ser llaves candidatas, ya que ambos pueden\n\nidentificar de manera única a un empleado.\n\nDe estas dos llaves candidatas, se elige una como la llave primaria (por\n\nejemplo,  DNI ).\n\nOctober 24, 2024 1057 AMque es una llave candidata1",
+          "que es una llave candidata\n\nit_bambootec\n\nOwner\n\nTags\n\nCreated time\n\nUna llave candidata (o clave candidata) es un conjunto de una o más columnas\nen una tabla de base de datos que puede identificar de manera única cada fila de\nla tabla. Es importante que una llave candidata cumpla dos propiedades clave:\n\n  Unicidad Los valores combinados de las columnas que forman la llave\n\ncandidata deben ser únicos para cada fila en la tabla. Esto asegura que no\nhaya duplicados en las filas.\n\n  Minimalidad La llave candidata debe ser el conjunto mínimo de columnas\n\nnecesario para garantizar la unicidad. Esto significa que no se puede eliminar\nninguna columna de la llave candidata sin perder la capacidad de identificar\n\nde manera única cada fila.",
+          "Limitar acciones no permitidas\n\nEstablecer reglas temporales y semánticas claras\n\nEjemplo conceptual:\n\n“Nunca crear un evento sin antes consultar el calendario.ˮ\n\n3.2 Control del contexto y de la memoria\n\nLa memoria del agente debe utilizarse con criterio:\n\nCreación y testeo de flujos con agentes IA en N8N3\fMantener contexto relevante\n\nEvitar estados críticos persistentes\n\nNo depender de memoria para lógica de negocio\n\nLa lógica debe estar en las reglas, no en el recuerdo del agente.\n\n3.3 Manejo de ambigüedad como parte del diseño\n\nUn buen flujo anticipa ambigüedades:\n\nMúltiples eventos con el mismo nombre\n\nFechas implícitas (“mismo díaˮ)\n\nHorarios relativos (“en la tardeˮ)\n\nBuenas prácticas:\n\nDefinir reglas de interpretación\n\nForzar aclaraciones cuando sea necesario",
+          "Qué acciones están permitidas\n\nEl MCP actúa como un contrato de seguridad y comportamiento, evitando que el\nagente:\n\nInvente acciones\n\nUse parámetros inválidos\n\nEjecute operaciones no autorizadas\n\nEn la práctica, conectar Tools a un AI Agent equivale a implementar MCP,\naunque el protocolo no sea visible para el usuario.\n\n4.3 Buenas prácticas al diseñar Tools\n\nCada tool debe cumplir una sola función\n\nLos parámetros deben ser claros y obligatorios\n\nNo mezclar lectura y escritura en una misma tool\n\nNombrar las tools de forma semántica\n\n5. Caso práctico: sincronización Notion – Google\nCalendar\n\n5.1 Contexto del trabajo realizado\n\nEl objetivo del trabajo fue construir un agente capaz de:\n\nLeer tareas diarias desde una base de datos de Notion\n\nCrear eventos en Google Calendar",
+          "Merge/Join (unión de\ntablas)\n\nO(n log n)  O(n^2)\n\nLa complejidad depende del tipo de unión\n(inner, outer, etc.) y el tamaño de los datos.\n\nPivot Pivoteo)\n\nO(n log n)  O(n^2)\n\nUnpivot Despivot)\n\nO(n log n)  O(n^2)\n\nExpansión de tablas\nanidadas\n\nAplicar funciones\npersonalizadas\n\nO(n^2)\n\nO(n^2)\n\nTransforma las columnas en filas o\nviceversa, reorganizando los datos.\n\nConvierte columnas en filas; es costoso\ncuando se realiza sobre grandes datasets.\n\nExpande datos dentro de columnas que\ncontienen tablas o listas anidadas.\n\nFunciones personalizadas pueden ser\ncostosas si no están optimizadas.\n\ncual es la complejidad en tiempo de las operaciones en Power Query2"
+        ],
+        "roadmap": {
+          "title": "Proceso técnico para identificar y validar claves candidatas en tablas de bases de datos relacionales",
+          "steps": [
+            {
+              "id": "step_1",
+              "label": "Analizar la estructura de la tabla y documentar atributos potenciales",
+              "description": "Se realiza un inventario completo de todas las columnas de la tabla, clasificándolas por tipo de dato, restricciones existentes y semántica del negocio. Este análisis inicial es fundamental para identificar qué atributos tienen potencial de ser claves candidatas, ya que solo aquellos que pueden identificar de manera única cada fila son candidatos válidos. Se documentan los atributos que por su naturaleza (DNI, email, número de serie, código único) tienen características de identificadores naturales.",
+              "type": "inicio",
+              "key_points": [
+                "Ejecutar: SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'nombre_tabla'",
+                "Identificar atributos con semántica de identificador único (DNI, email, código, matrícula, IBAN)",
+                "Documentar restricciones existentes: UNIQUE, PRIMARY KEY, FOREIGN KEY",
+                "Clasificar columnas por cardinalidad esperada (baja, media, alta)"
+              ]
+            },
+            {
+              "id": "step_2",
+              "label": "Verificar la propiedad de no nulidad en cada columna candidata",
+              "description": "Se valida que la columna candidata no contenga valores NULL, ya que una clave candidata debe poder identificar de manera única cada fila sin excepciones. Una columna con valores NULL no puede ser clave candidata porque NULL no es comparable con otros valores y viola el principio de unicidad absoluta. Se ejecuta una consulta que cuenta registros nulos para cada columna potencial.",
+              "type": "proceso",
+              "key_points": [
+                "Ejecutar: SELECT COUNT(*) as nulos FROM tabla WHERE columna_candidata IS NULL",
+                "Resultado esperado: 0 registros nulos (si hay nulos, la columna NO es candidata)",
+                "Verificar en el esquema: ALTER TABLE tabla MODIFY columna_candidata NOT NULL (si aplica)",
+                "CUIDADO: En algunas bases de datos (PostgreSQL, MySQL), NULL no viola restricción UNIQUE, pero sigue siendo inválido para clave candidata"
+              ]
+            },
+            {
+              "id": "step_3",
+              "label": "Verificar la propiedad de unicidad en cada columna candidata",
+              "description": "Se comprueba que ningún valor se repite en la columna candidata, garantizando que cada fila pueda ser identificada de forma inequívoca sin depender de otras columnas. Esta es la propiedad más crítica de una clave candidata: la capacidad de distinguir cada registro de los demás de manera única. Se ejecutan consultas de agrupación para detectar duplicados.",
+              "type": "proceso",
+              "key_points": [
+                "Ejecutar: SELECT columna_candidata, COUNT(*) as frecuencia FROM tabla GROUP BY columna_candidata HAVING COUNT(*) > 1",
+                "Resultado esperado: cero filas (si hay resultados, existen duplicados y la columna NO es candidata)",
+                "Alternativa: SELECT COUNT(DISTINCT columna_candidata) FROM tabla debe ser igual a SELECT COUNT(*) FROM tabla",
+                "Aplicar restricción: ALTER TABLE tabla ADD CONSTRAINT uk_columna UNIQUE (columna_candidata)"
+              ]
+            },
+            {
+              "id": "step_4",
+              "label": "Identificar dependencias funcionales entre atributos",
+              "description": "Se analiza si existen dependencias funcionales donde un conjunto de columnas determina de manera única a otro conjunto de columnas. Una clave candidata compuesta puede estar formada por múltiples atributos que juntos identifican de forma única cada fila, aunque individualmente no lo hagan. Este análisis es esencial para descubrir claves candidatas que no son obvias a nivel de columna individual.",
+              "type": "proceso",
+              "key_points": [
+                "Ejecutar análisis: SELECT col1, col2, COUNT(*) FROM tabla GROUP BY col1, col2 HAVING COUNT(*) > 1 (para claves compuestas)",
+                "Documentar: Si (col1, col2) determina únicamente a col3, entonces col3 depende funcionalmente de (col1, col2)",
+                "Verificar que no exista dependencia circular o redundante entre candidatas",
+                "Ejemplo: En tabla empleados, (departamento, numero_empleado) puede ser clave candidata aunque individualmente no lo sean"
+              ]
+            },
+            {
+              "id": "step_5",
+              "label": "[inferido] Validar la irreductibilidad de claves candidatas compuestas",
+              "description": "Se verifica que ningún subconjunto de una clave candidata compuesta sea también una clave candidata, asegurando que la clave es minimal. Una clave candidata debe ser irreducible: si se elimina cualquier atributo de ella, deja de ser clave candidata. Este principio evita redundancia y garantiza que se ha identificado la clave más eficiente.",
+              "type": "proceso",
+              "key_points": [
+                "Para clave compuesta (col1, col2, col3): verificar que (col1, col2), (col1, col3) y (col2, col3) NO sean claves candidatas",
+                "Ejecutar: SELECT col1, col2, COUNT(*) FROM tabla GROUP BY col1, col2 HAVING COUNT(*) > 1 (si hay resultados, col3 es redundante)",
+                "Resultado esperado: cada subconjunto debe tener duplicados",
+                "Documentar: La clave candidata es (col1, col2, col3) y no puede reducirse"
+              ]
+            },
+            {
+              "id": "step_6",
+              "label": "Comparar claves candidatas identificadas y documentar sus características",
+              "description": "Se realiza un análisis comparativo de todas las claves candidatas encontradas, evaluando su estabilidad, tamaño, tipo de dato y frecuencia de cambio. Según el contexto del negocio, una tabla puede tener múltiples claves candidatas válidas (como DNI y Correo Electrónico en empleados), y es necesario documentar todas para facilitar la selección de la clave primaria. Se crea una matriz de comparación con criterios técnicos y de negocio.",
+              "type": "proceso",
+              "key_points": [
+                "Crear tabla comparativa: Candidata | Tipo | Tamaño | Estabilidad | Frecuencia_Cambio | Índice_Existente",
+                "Evaluar estabilidad: ¿El valor cambia frecuentemente? (DNI es estable, email puede cambiar)",
+                "Verificar si ya existen índices: SELECT * FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_NAME = 'tabla'",
+                "Documentar: Candidata1 (DNI): 9 bytes, estable, sin cambios | Candidata2 (Email): 255 bytes, inestable, cambios frecuentes"
+              ]
+            },
+            {
+              "id": "step_7",
+              "label": "Seleccionar la clave primaria entre las candidatas identificadas",
+              "description": "Se elige una de las claves candidatas como clave primaria (primary key) basándose en criterios técnicos y de negocio. La clave primaria será la que se use principalmente para identificar de manera única las filas y para crear índices de búsqueda rápida. Los criterios de selección incluyen: tamaño mínimo, estabilidad máxima, frecuencia de uso en consultas y naturalidad del identificador.",
+              "type": "decision",
+              "key_points": [
+                "Criterios de selección: (1) Tamaño mínimo, (2) Máxima estabilidad, (3) Máxima frecuencia de uso en WHERE/JOIN, (4) Tipo de dato numérico preferible",
+                "Ejecutar: ALTER TABLE tabla ADD PRIMARY KEY (columna_seleccionada)",
+                "Verificar: SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'tabla' AND CONSTRAINT_TYPE = 'PRIMARY KEY'",
+                "Ejemplo: En empleados, elegir DNI como PK (9 bytes, estable) sobre Email (255 bytes, inestable)"
+              ]
+            },
+            {
+              "id": "step_8",
+              "label": "Crear índices UNIQUE para claves candidatas no seleccionadas",
+              "description": "Se crean restricciones UNIQUE e índices para las claves candidatas que no fueron seleccionadas como clave primaria, permitiendo que sigan siendo útiles como claves alternativas. Estos índices garantizan la unicidad sin ser la clave principal, y permiten búsquedas rápidas por estos atributos alternativos. Las claves alternativas son críticas para mantener la integridad referencial y optimizar consultas.",
+              "type": "proceso",
+              "key_points": [
+                "Ejecutar para cada candidata no seleccionada: ALTER TABLE tabla ADD CONSTRAINT uk_candidata UNIQUE (columna_candidata)",
+                "Crear índice: CREATE UNIQUE INDEX idx_candidata ON tabla (columna_candidata)",
+                "Verificar: SELECT * FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_NAME = 'tabla' AND NON_UNIQUE = 0",
+                "Resultado esperado: Un índice PRIMARY KEY + N índices UNIQUE (uno por cada clave alternativa)"
+              ]
+            },
+            {
+              "id": "step_9",
+              "label": "Validar integridad referencial con claves candidatas en relaciones",
+              "description": "Se verifica que las claves candidatas (primaria y alternativas) sean correctamente referenciadas por claves foráneas en otras tablas. Las relaciones entre tablas deben apuntar a claves candidatas válidas para mantener la integridad referencial. Se auditan todas las FOREIGN KEY que apunten a la tabla actual para asegurar que referencian claves candidatas válidas.",
+              "type": "proceso",
+              "key_points": [
+                "Ejecutar: SELECT CONSTRAINT_NAME, TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME = 'tabla'",
+                "Verificar que REFERENCED_COLUMN_NAME sea una clave candidata (PK o UNIQUE)",
+                "Validar: SELECT COUNT(*) FROM tabla_referenciadora WHERE clave_foranea NOT IN (SELECT clave_candidata FROM tabla)",
+                "Resultado esperado: cero filas huérfanas (integridad referencial válida)"
+              ]
+            },
+            {
+              "id": "step_10",
+              "label": "Documentar el diccionario de datos con claves candidatas",
+              "description": "Se registra en el diccionario de datos de la organización la identificación completa de todas las claves candidatas, incluyendo su definición, propiedades, restricciones y justificación de selección. Esta documentación es esencial para que otros desarrolladores, analistas y administradores de bases de datos comprendan la estructura de identificación de la tabla y puedan tomar decisiones informadas sobre su uso.",
+              "type": "proceso",
+              "key_points": [
+                "Documentar por cada candidata: Nombre | Tipo | Composición | Unicidad | Nulidad | Estabilidad | Rol (PK/Alternativa) | Justificación",
+                "Ejemplo: DNI | VARCHAR(9) | Simple | Sí | No | Alta | PK | Identificador natural estable del empleado",
+                "Incluir: Restricciones SQL aplicadas, índices creados, relaciones que la referencian",
+                "Almacenar en: Wiki técnica, repositorio de esquemas, o herramienta de gobernanza de datos"
+              ]
+            },
+            {
+              "id": "step_11",
+              "label": "Ejecutar pruebas de integridad y consistencia de claves candidatas",
+              "description": "Se realizan pruebas automatizadas para verificar que las claves candidatas mantienen sus propiedades de unicidad y no nulidad en el tiempo, especialmente después de operaciones de inserción, actualización o eliminación. Estas pruebas garantizan que la identificación de claves candidatas es correcta y que las restricciones se mantienen bajo carga operativa.",
+              "type": "proceso",
+              "key_points": [
+                "Test 1 - Inserción duplicada: INSERT INTO tabla (clave_candidata, ...) VALUES ('valor_existente', ...) debe fallar con error UNIQUE",
+                "Test 2 - Inserción nula: INSERT INTO tabla (clave_candidata, ...) VALUES (NULL, ...) debe fallar con error NOT NULL",
+                "Test 3 - Actualización duplicada: UPDATE tabla SET clave_candidata = 'valor_existente' WHERE id = X debe fallar",
+                "Test 4 - Consulta de performance: SELECT * FROM tabla WHERE clave_candidata = 'valor' debe usar índice (EXPLAIN PLAN)"
+              ]
+            },
+            {
+              "id": "step_12",
+              "label": "Revisar y ajustar claves candidatas según evolución del negocio",
+              "description": "Se establece un proceso de revisión periódica de las claves candidatas identificadas para asegurar que siguen siendo válidas conforme el negocio evoluciona. Cambios en los requisitos, nuevos atributos, o modificaciones en la semántica del dominio pueden afectar la validez de una clave candidata. Se documenta un plan de auditoría trimestral o anual.",
+              "type": "fin",
+              "key_points": [
+                "Revisar anualmente: ¿Siguen siendo únicos los valores de la clave candidata? ¿Ha cambiado la semántica del atributo?",
+                "Ejecutar: SELECT columna_candidata, COUNT(*) FROM tabla GROUP BY columna_candidata HAVING COUNT(*) > 1 (detección de nuevos duplicados)",
+                "Evaluar nuevos atributos: ¿Existen nuevas columnas que podrían ser claves candidatas?",
+                "Documentar cambios: Mantener histórico de decisiones y justificaciones en el diccionario de datos"
+              ]
+            }
+          ]
+        },
+        "steps": [
+          "Analizar la estructura de la tabla y documentar atributos potenciales",
+          "Verificar la propiedad de no nulidad en cada columna candidata",
+          "Verificar la propiedad de unicidad en cada columna candidata",
+          "Identificar dependencias funcionales entre atributos",
+          "[inferido] Validar la irreductibilidad de claves candidatas compuestas",
+          "Comparar claves candidatas identificadas y documentar sus características",
+          "Seleccionar la clave primaria entre las candidatas identificadas",
+          "Crear índices UNIQUE para claves candidatas no seleccionadas",
+          "Validar integridad referencial con claves candidatas en relaciones",
+          "Documentar el diccionario de datos con claves candidatas",
+          "Ejecutar pruebas de integridad y consistencia de claves candidatas",
+          "Revisar y ajustar claves candidatas según evolución del negocio"
+        ],
+        "expected_steps": [
+          "Listar atributos de la tabla",
+          "Verificar unicidad por atributo",
+          "Verificar minimalidad",
+          "Documentar llaves candidatas encontradas"
+        ],
+        "classic": {
+          "relevance": {
+            "score": 9,
+            "justification": "El roadmap responde directamente a la pregunta sobre cómo identificar llaves candidatas. Cubre el análisis de estructura, verificación de propiedades (unicidad y no nulidad) y selección de clave primaria, alineado con la definición del contexto RAG."
+          },
+          "completeness": {
+            "score": 8,
+            "justification": "Incluye los pasos esenciales: análisis de estructura, verificación de no nulidad, verificación de unicidad, dependencias funcionales, irreductibilidad, comparación, selección de primaria, índices, integridad referencial, documentación, pruebas y revisión. Solo falta explícitamente la validación de dependencias funcionales en el contexto recuperado, pero está inferida en el paso 4."
+          },
+          "coherence": {
+            "score": 9,
+            "justification": "El orden lógico es correcto: primero analizar estructura, luego validar propiedades fundamentales (no nulidad y unicidad), después analizar dependencias, validar irreductibilidad, comparar candidatas, seleccionar primaria, crear índices, validar integridad, documentar y probar. Cada paso depende causalmente del anterior."
+          },
+          "technical_accuracy": {
+            "score": 9,
+            "justification": "Los detalles técnicos son precisos: consultas SQL correctas (INFORMATION_SCHEMA, GROUP BY HAVING, COUNT), conceptos de unicidad y minimalidad bien aplicados, manejo correcto de NULL en claves candidatas. La única imprecisión menor es que el paso 3 está truncado en el contexto proporcionado."
+          },
+          "context_fidelity": {
+            "score": 9,
+            "justification": "El roadmap se basa fielmente en el contexto RAG: define correctamente llave candidata con sus dos propiedades (unicidad y minimalidad), usa el ejemplo de DNI y Correo Electrónico, explica la selección de clave primaria. No inventa datos ni conceptos no presentes en el contexto."
+          },
+          "summary": "El roadmap es altamente relevante, coherente y técnicamente preciso. Cubre completamente el proceso de identificación de llaves candidatas con pasos bien ordenados y fundamentados en el contexto proporcionado. La experiencia del usuario es clara y ejecutable."
+        },
+        "sequence_eval": {
+          "score": 10,
+          "is_valid": true,
+          "out_of_order_steps": [],
+          "suggested_fix": "Orden correcto",
+          "explanation": "Las dependencias causales están correctamente ordenadas: (1) Analizar estructura → (2) Verificar no nulidad → (3) Verificar unicidad → (4) Identificar dependencias funcionales → (5) Validar irreductibilidad → (6) Comparar candidatas → (7) Seleccionar primaria → (8) Crear índices → (9) Validar integridad referencial → (10) Documentar → (11) Probar → (12) Revisar. Cada paso requiere los resultados del anterior y no depende de pasos posteriores."
+        },
+        "mese": {
+          "mapping": 9,
+          "mapping_justification": "El contenido de cada paso es factualmente correcto según el contexto RAG. Las propiedades de unicidad y minimalidad se aplican correctamente. Las consultas SQL son válidas. La única limitación es que el paso 3 está truncado en el contexto, pero lo que existe es preciso. No hay afirmaciones falsas.",
+          "exhaustiveness": 9,
+          "exhaustiveness_justification": "Cobertura completa de pasos necesarios: análisis inicial, validación de propiedades fundamentales (no nulidad, unicidad), análisis de dependencias funcionales, validación de minimalidad, comparación, selección, implementación (índices), validación de integridad, documentación, pruebas y revisión. El único paso potencialmente faltante sería 'normalización de la tabla' pero no es esencial para identificar candidatas.",
+          "sequence": 10,
+          "sequence_justification": "Dependencias causales correctas. No hay violaciones: no se verifica unicidad antes de analizar estructura, no se selecciona primaria antes de identificar todas las candidatas, no se crean índices antes de validar candidatas. El orden respeta la lógica de investigación → validación → selección → implementación.",
+          "experience": 9,
+          "experience_justification": "Todos los pasos son accionables y específicos. Incluyen comandos SQL concretos, criterios claros de validación (COUNT(*) = 0 para nulos, HAVING COUNT(*) > 1 para duplicados), y objetivos medibles. La única ambigüedad menor es el paso 4 sobre 'dependencias funcionales' que podría beneficiarse de más detalle, pero es suficientemente claro en contexto.",
+          "composite": 9.35
+        },
+        "structure": {
+          "score": 9.14,
+          "verdict": "PASS",
+          "passed": 11,
+          "total_checks": 12,
+          "pass_rate": 0.9167,
+          "checks": [
+            {
+              "name": "step_count",
+              "passed": true,
+              "detail": "12 pasos (requiere 6-12)",
+              "weight": 1.5
+            },
+            {
+              "name": "has_title",
+              "passed": true,
+              "detail": "Título: 'Proceso técnico para identificar y validar claves candidatas'",
+              "weight": 1.0
+            },
+            {
+              "name": "unique_ids",
+              "passed": true,
+              "detail": "IDs únicos",
+              "weight": 1.0
+            },
+            {
+              "name": "single_inicio",
+              "passed": true,
+              "detail": "Nodos 'inicio': 1 (debe ser 1)",
+              "weight": 1.2
+            },
+            {
+              "name": "single_fin",
+              "passed": true,
+              "detail": "Nodos 'fin': 1 (debe ser 1)",
+              "weight": 1.2
+            },
+            {
+              "name": "starts_with_inicio",
+              "passed": true,
+              "detail": "Primer paso tipo 'inicio' (debe ser 'inicio')",
+              "weight": 1.0
+            },
+            {
+              "name": "ends_with_fin",
+              "passed": true,
+              "detail": "Último paso tipo 'fin' (debe ser 'fin')",
+              "weight": 1.0
+            },
+            {
+              "name": "valid_types",
+              "passed": true,
+              "detail": "Todos los tipos son válidos",
+              "weight": 1.0
+            },
+            {
+              "name": "key_points_count",
+              "passed": true,
+              "detail": "Todos tienen 3-5 key_points",
+              "weight": 1.5
+            },
+            {
+              "name": "label_action_verb",
+              "passed": false,
+              "detail": "Sin verbo de acción: ['[inferido] Validar la irreductibilidad de claves candidatas ', 'Comparar claves candidatas identificadas y documentar sus ca']",
+              "weight": 1.2
+            },
+            {
+              "name": "description_min_length",
+              "passed": true,
+              "detail": "Todas las descripciones tienen >=2 oraciones",
+              "weight": 1.3
+            },
+            {
+              "name": "no_empty_fields",
+              "passed": true,
+              "detail": "Sin campos vacíos",
+              "weight": 1.0
+            }
+          ],
+          "violations": [
+            "Sin verbo de acción: ['[inferido] Validar la irreductibilidad de claves candidatas ', 'Comparar claves candidatas identificadas y documentar sus ca']"
+          ]
+        },
+        "similarity": {
+          "tfidf": 0.2082,
+          "semantic": 0.6406,
+          "semantic_0_10": 6.41,
+          "gain": 0.4324,
+          "interpretation": "Alta relevancia — la respuesta aborda directamente la pregunta"
+        },
+        "response_time": 28.5,
+        "overall_score": 8.8,
+        "verdict": "PASS",
+        "mese_verdict": "PASS"
+      },
+      {
+        "question": "¿Cuál es la diferencia entre llave primaria y llave candidata?",
+        "category": "bases_de_datos",
+        "ground_truth": "Todas las llaves primarias son llaves candidatas, pero no al revés. De todas las llaves candidatas se elige una como llave primaria. Las demás se llaman llaves alternativas.",
+        "answer": "# Roadmap Técnico: Diferenciación entre Clave Primaria y Clave Candidata en Diseño de Bases de Datos Relacionales\n\n1. [PROCESO] Identificar todas las columnas candidatas que cumplen unicidad en la tabla\n   Se realiza un análisis exhaustivo de cada columna o combinación de columnas para determinar cuáles pueden identificar de manera única cada fila. Una clave candidata debe cumplir dos propiedades: unicidad (valores combinados únicos para cada fila) y minimalidad (conjunto mínimo de columnas necesario). Este paso establece el conjunto de todas las posibles claves candidatas antes de seleccionar la primaria.\n   • Ejecutar: SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1 para verificar unicidad por columna\n   • Para claves compuestas: SELECT col1, col2, COUNT(*) FROM tabla GROUP BY col1, col2 HAVING COUNT(*) > 1\n   • Resultado esperado: cero filas retornadas (indica que no hay duplicados)\n   • Documentar todas las combinaciones que cumplen minimalidad: no se puede eliminar ninguna columna sin perder unicidad\n   • Considerar columnas con NULL: en PostgreSQL y MySQL, NULL no viola restricción UNIQUE (múltiples NULLs permitidos)\n\n2. [PROCESO] Verificar la propiedad de minimalidad en cada clave candidata identificada\n   Se valida que cada clave candidata sea el conjunto mínimo de columnas necesario para garantizar unicidad. Esto significa que no se puede eliminar ninguna columna sin perder la capacidad de identificar de forma única cada fila. La minimalidad es crítica porque una clave candidata que contiene columnas innecesarias no es verdaderamente candidata.\n   • Para cada clave candidata compuesta, remover una columna a la vez y ejecutar: SELECT col_subset, COUNT(*) FROM tabla GROUP BY col_subset HAVING COUNT(*) > 1\n   • Si la consulta retorna filas, la columna removida es necesaria (la clave es minimal)\n   • Si la consulta retorna cero filas, la columna removida es redundante (la clave NO es minimal, descartar)\n   • Documentar: 'Clave candidata CC1: (emp_id, dept_id) es minimal porque remover cualquier columna genera duplicados'\n   • CUIDADO: Una clave candidata no minimal no puede ser considerada como tal; debe descartarse del análisis\n\n3. [PROCESO] Documentar todas las claves candidatas válidas con sus características de nulabilidad\n   Se registra formalmente cada clave candidata identificada, incluyendo su composición, restricciones de nulabilidad y comportamiento en el motor de base de datos específico. Esta documentación es esencial porque la clave primaria será seleccionada de este conjunto, y la nulabilidad afecta directamente la integridad referencial y las operaciones de búsqueda.\n   • Formato de documentación: 'CC1: (employee_id) - NOT NULL, UNIQUE, tipo INT, motor: PostgreSQL 14'\n   • Formato de documentación: 'CC2: (email) - NOT NULL, UNIQUE, tipo VARCHAR(255), motor: PostgreSQL 14'\n   • Verificar restricción NOT NULL: ejecutar SELECT COUNT(*) FROM tabla WHERE col IS NULL; resultado debe ser 0\n   • Registrar comportamiento de NULL en el motor: 'PostgreSQL: múltiples NULLs permitidos en UNIQUE; MySQL: igual comportamiento'\n   • Crear tabla de comparación: columnas (Clave_Candidata, Columnas, Nulabilidad, Tipo_Dato, Restricciones)\n\n4. [DECISION] Seleccionar la clave primaria del conjunto de claves candidatas según criterios de negocio\n   Se elige una única clave candidata para ser designada como clave primaria (Primary Key). Esta selección no es técnica sino estratégica: la clave primaria debe ser NOT NULL obligatoriamente, estable (no cambiar durante la vida del registro), y preferentemente simple (una sola columna) para optimizar operaciones de búsqueda y referencias externas. Las claves candidatas no seleccionadas pueden convertirse en claves únicas alternativas.\n   • Criterios de selección: estabilidad (no cambia), simplicidad (preferir columna única), performance (índice eficiente), semántica (identificador natural vs surrogate)\n   • Ejemplo: entre CC1(employee_id) y CC2(email), seleccionar employee_id como PK porque email puede cambiar (inestable)\n   • La clave primaria DEBE tener restricción NOT NULL: ALTER TABLE tabla ADD CONSTRAINT pk_tabla PRIMARY KEY (columna)\n   • Documentar decisión: 'PK seleccionada: employee_id porque es estable, simple y no nula. CC2(email) se convierte en UNIQUE KEY alternativa'\n   • CUIDADO: Una clave primaria no puede ser NULL en ningún registro; esto viola la integridad de la entidad\n\n5. [PROCESO] Implementar la clave primaria con restricción NOT NULL y crear índice asociado\n   Se ejecuta la definición formal de la clave primaria en el motor de base de datos, asegurando que se cree automáticamente un índice único y que se aplique la restricción NOT NULL. La clave primaria es el mecanismo de integridad de entidad que garantiza que cada fila es identificable de forma única y que no puede haber valores nulos.\n   • Sintaxis PostgreSQL: ALTER TABLE employees ADD CONSTRAINT pk_employees PRIMARY KEY (employee_id)\n   • Sintaxis MySQL: ALTER TABLE employees ADD PRIMARY KEY (employee_id)\n   • Verificar creación de índice: SELECT * FROM information_schema.statistics WHERE table_name='employees' AND column_name='employee_id'\n   • Resultado esperado: índice con nombre 'PRIMARY' o 'pk_employees' creado automáticamente\n   • Validar restricción NOT NULL: SELECT COUNT(*) FROM employees WHERE employee_id IS NULL; debe retornar 0\n\n6. [PROCESO] Convertir claves candidatas no seleccionadas en restricciones UNIQUE KEY\n   Las claves candidatas que no fueron elegidas como primaria se implementan como claves únicas alternativas (UNIQUE KEY). Esto preserva la capacidad de identificación única de esas columnas y permite que sean usadas como referencias externas en otras tablas, aunque la clave primaria siga siendo el identificador principal. Las claves únicas alternativas son críticas para la integridad referencial flexible.\n   • Sintaxis: ALTER TABLE employees ADD CONSTRAINT uk_employees_email UNIQUE (email)\n   • Para claves compuestas: ALTER TABLE orders ADD CONSTRAINT uk_orders_customer_date UNIQUE (customer_id, order_date)\n   • Verificar creación: SELECT * FROM information_schema.table_constraints WHERE table_name='employees' AND constraint_type='UNIQUE'\n   • CUIDADO: UNIQUE KEY permite múltiples NULLs en PostgreSQL/MySQL (diferente de PK que no permite ninguno)\n   • Documentar: 'UK1: email (alternativa a PK), UK2: (customer_id, order_date) para evitar duplicados de pedidos por fecha'\n\n7. [PROCESO] [inferido] Definir integridad referencial usando la clave primaria como referencia externa\n   Se establecen relaciones entre tablas mediante claves foráneas (Foreign Keys) que apuntan a la clave primaria de la tabla referenciada. La clave primaria es el único identificador válido para crear referencias externas porque garantiza unicidad y no nulabilidad. Las claves candidatas alternativas (UNIQUE KEY) pueden usarse como referencias solo en casos específicos donde se requiera flexibilidad.\n   • Sintaxis: ALTER TABLE orders ADD CONSTRAINT fk_orders_employee FOREIGN KEY (employee_id) REFERENCES employees(employee_id)\n   • La columna referenciada DEBE ser clave primaria o UNIQUE KEY: SELECT constraint_type FROM information_schema.table_constraints WHERE table_name='employees' AND column_name='employee_id'\n   • Verificar integridad referencial: SELECT * FROM orders WHERE employee_id NOT IN (SELECT employee_id FROM employees)\n   • Resultado esperado: cero filas (no hay orfandad de registros)\n   • Configurar acciones: ON DELETE CASCADE o ON DELETE RESTRICT según política de negocio\n\n8. [PROCESO] Validar que la clave primaria no contiene valores duplicados ni nulos en datos existentes\n   Se ejecuta una validación exhaustiva de los datos existentes en la tabla para asegurar que la clave primaria seleccionada cumple con sus restricciones antes de aplicarla formalmente. Esta validación previene errores de integridad que podrían bloquear la aplicación de la restricción PRIMARY KEY.\n   • Consulta de duplicados: SELECT employee_id, COUNT(*) FROM employees GROUP BY employee_id HAVING COUNT(*) > 1\n   • Consulta de nulos: SELECT COUNT(*) FROM employees WHERE employee_id IS NULL\n   • Consulta combinada: SELECT employee_id, COUNT(*) as cnt FROM employees GROUP BY employee_id HAVING COUNT(*) > 1 OR employee_id IS NULL\n   • Resultado esperado: cero filas retornadas en ambas consultas\n   • Si hay violaciones: ejecutar DELETE FROM employees WHERE employee_id IS NULL; DELETE FROM employees WHERE employee_id IN (SELECT employee_id FROM employees GROUP BY employee_id HAVING COUNT(*) > 1)\n\n9. [PROCESO] Documentar la diferencia conceptual entre clave primaria y clave candidata en el modelo de datos\n   Se registra formalmente en la documentación del modelo de datos la distinción entre clave primaria (PK) y claves candidatas (CC), explicando que la PK es una selección específica de una CC, mientras que las CC no seleccionadas pueden convertirse en claves únicas alternativas. Esta documentación es esencial para que otros desarrolladores comprendan la estructura de integridad de la tabla.\n   • Documento: 'Tabla EMPLOYEES: PK=employee_id (seleccionada por estabilidad y simplicidad). CC1=employee_id (seleccionada como PK). CC2=email (convertida a UNIQUE KEY). CC3=ssn (convertida a UNIQUE KEY).'\n   • Explicar: 'Clave Primaria: identificador único obligatorio, NOT NULL, usado para integridad de entidad e integridad referencial. Clave Candidata: cualquier columna o combinación que podría ser PK pero no fue seleccionada.'\n   • Incluir tabla comparativa: Propiedad | Clave Primaria | Clave Candidata | Valores NULL | No | Sí (depende del motor) | Unicidad | Obligatoria | Obligatoria | Cantidad por tabla | 1 | N (múltiples)\n   • Registrar restricciones: 'PK: NOT NULL + UNIQUE + INDEX automático. CC: UNIQUE + INDEX opcional + permite NULL'\n   • Versionar documento: incluir fecha, autor, versión del motor de BD, cambios realizados\n\n10. [PROCESO] Crear índices optimizados en claves candidatas para operaciones de búsqueda frecuentes\n   Se generan índices explícitos en las claves candidatas no seleccionadas como primaria para optimizar consultas de búsqueda que usen esas columnas como criterio. Aunque la clave primaria crea automáticamente un índice, las claves candidatas alternativas requieren índices manuales para garantizar performance en operaciones de filtrado y join.\n   • Sintaxis: CREATE UNIQUE INDEX idx_employees_email ON employees(email)\n   • Para claves compuestas: CREATE UNIQUE INDEX idx_orders_customer_date ON orders(customer_id, order_date)\n   • Verificar índices creados: SELECT * FROM information_schema.statistics WHERE table_name='employees'\n   • Analizar plan de ejecución: EXPLAIN SELECT * FROM employees WHERE email='user@example.com'; debe mostrar 'Index Scan' o 'Index Seek'\n   • CUIDADO: Índices en claves candidatas consumen espacio en disco; evaluar trade-off entre performance de lectura y costo de almacenamiento\n\n11. [PROCESO] Validar restricciones de integridad referencial en cascada desde la clave primaria\n   Se verifica que todas las claves foráneas que referencian la clave primaria funcionan correctamente y que las políticas de eliminación/actualización en cascada se aplican según lo esperado. Esta validación asegura que la integridad referencial se mantiene cuando se modifican registros en la tabla principal.\n   • Listar todas las FK que referencian la PK: SELECT * FROM information_schema.referential_constraints WHERE unique_constraint_table_name='employees'\n   • Verificar orfandad: SELECT * FROM orders WHERE employee_id NOT IN (SELECT employee_id FROM employees)\n   • Probar cascada: DELETE FROM employees WHERE employee_id=1; verificar que los pedidos asociados se eliminaron (si ON DELETE CASCADE)\n   • Probar restricción: DELETE FROM employees WHERE employee_id=2; debe fallar si existen pedidos asociados (si ON DELETE RESTRICT)\n   • Resultado esperado: cero filas orfanas después de operaciones de eliminación/actualización\n\n12. [FIN] Documentar decisiones de diseño y crear matriz de trazabilidad entre claves y restricciones\n   Se genera un documento final que registra todas las decisiones de diseño tomadas, incluyendo por qué se seleccionó una clave candidata específica como primaria, qué claves candidatas se convirtieron en UNIQUE KEY, y cómo se implementó la integridad referencial. Esta matriz de trazabilidad es crítica para auditoría, mantenimiento futuro y onboarding de nuevos desarrolladores.\n   • Matriz de trazabilidad: Columnas (Clave_Candidata, Tipo_Restricción, Nulabilidad, Índice, Razón_Selección, Fecha_Implementación, Responsable)\n   • Ejemplo fila: 'employee_id | PRIMARY KEY | NOT NULL | idx_pk_employee_id | Estable, simple, no cambia | 2024-01-15 | DBA_Senior'\n   • Incluir diagrama ER actualizado mostrando PK, UK, y FK con sus relaciones\n   • Documentar excepciones: 'CC3(ss\n",
+        "contexts": [
+          "de manera única cada fila.\n\nUna tabla puede tener varias llaves candidatas. De estas, una se selecciona como\n\nla llave primaria (primary key), que es la que se usa principalmente para\nidentificar de manera única las filas. Las llaves candidatas que no son\nseleccionadas como llaves primarias pueden seguir siendo útiles como llaves\n\nalternativas.\n\nEjemplo:\n\nEn una tabla de empleados:\n\nDNI  y  Correo Electrónico  pueden ser llaves candidatas, ya que ambos pueden\n\nidentificar de manera única a un empleado.\n\nDe estas dos llaves candidatas, se elige una como la llave primaria (por\n\nejemplo,  DNI ).\n\nOctober 24, 2024 1057 AMque es una llave candidata1",
+          "que es una llave candidata\n\nit_bambootec\n\nOwner\n\nTags\n\nCreated time\n\nUna llave candidata (o clave candidata) es un conjunto de una o más columnas\nen una tabla de base de datos que puede identificar de manera única cada fila de\nla tabla. Es importante que una llave candidata cumpla dos propiedades clave:\n\n  Unicidad Los valores combinados de las columnas que forman la llave\n\ncandidata deben ser únicos para cada fila en la tabla. Esto asegura que no\nhaya duplicados en las filas.\n\n  Minimalidad La llave candidata debe ser el conjunto mínimo de columnas\n\nnecesario para garantizar la unicidad. Esto significa que no se puede eliminar\nninguna columna de la llave candidata sin perder la capacidad de identificar\n\nde manera única cada fila.",
+          "Dificultad para reproducir errores\n\nDependencia del contexto conversacional\n\nNecesidad de gobernanza sobre decisiones automáticas\n\nPor este motivo, la creación de flujos bien diseñados se convierte en el factor\nmás crítico para garantizar estabilidad, escalabilidad y confiabilidad.\n\n2. Principios fundamentales en la creación de flujos en\nn8n\n\n2.1 Pensar el flujo como una arquitectura, no como una secuencia\n\nUna mala práctica común es diseñar flujos como simples cadenas de nodos. En\nentornos con agentes, el flujo debe concebirse como una arquitectura lógica,\ndonde cada componente cumple una función clara.\n\nBuenas prácticas:\n\nDefinir un objetivo único por flujo\n\nEvitar flujos monolíticos\n\nDiseñar flujos legibles y auditables",
+          "Simplemente elimina referencias a las\n\ncolumnas; no afecta el tamaño de los\n\ndatos.\n\nFiltra filas según una condición sin\n\ntransformar los valores.\n\nCombina dos o más columnas; su\n\ncomplejidad depende del tamaño de las\n\ncolumnas.\n\nAplicación de funciones sobre las\n\ncolumnas de datos, como cambiar el tipo\n\nde dato.\n\nOrdenar una tabla por una o más\n\ncolumnas.\n\nEliminación de\n\nduplicados\n\nO(n log n)\n\nImplica ordenar los datos antes de eliminar\n\nlos duplicados.\n\nOctober 14, 2024 838 AMcual es la complejidad en tiempo de las operaciones en Power Query1\fGroup By\nAgrupación)\n\nO(n log n)\n\nRequiere ordenar y agrupar según uno o\nmás criterios.\n\nMerge/Join (unión de\ntablas)\n\nO(n log n)  O(n^2)\n\nLa complejidad depende del tipo de unión\n(inner, outer, etc.) y el tamaño de los datos.",
+          "Qué acciones están permitidas\n\nEl MCP actúa como un contrato de seguridad y comportamiento, evitando que el\nagente:\n\nInvente acciones\n\nUse parámetros inválidos\n\nEjecute operaciones no autorizadas\n\nEn la práctica, conectar Tools a un AI Agent equivale a implementar MCP,\naunque el protocolo no sea visible para el usuario.\n\n4.3 Buenas prácticas al diseñar Tools\n\nCada tool debe cumplir una sola función\n\nLos parámetros deben ser claros y obligatorios\n\nNo mezclar lectura y escritura en una misma tool\n\nNombrar las tools de forma semántica\n\n5. Caso práctico: sincronización Notion – Google\nCalendar\n\n5.1 Contexto del trabajo realizado\n\nEl objetivo del trabajo fue construir un agente capaz de:\n\nLeer tareas diarias desde una base de datos de Notion\n\nCrear eventos en Google Calendar"
+        ],
+        "roadmap": {
+          "title": "Roadmap Técnico: Diferenciación entre Clave Primaria y Clave Candidata en Diseño de Bases de Datos Relacionales",
+          "steps": [
+            {
+              "id": "step_1",
+              "label": "Identificar todas las columnas candidatas que cumplen unicidad en la tabla",
+              "description": "Se realiza un análisis exhaustivo de cada columna o combinación de columnas para determinar cuáles pueden identificar de manera única cada fila. Una clave candidata debe cumplir dos propiedades: unicidad (valores combinados únicos para cada fila) y minimalidad (conjunto mínimo de columnas necesario). Este paso establece el conjunto de todas las posibles claves candidatas antes de seleccionar la primaria.",
+              "type": "proceso",
+              "key_points": [
+                "Ejecutar: SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1 para verificar unicidad por columna",
+                "Para claves compuestas: SELECT col1, col2, COUNT(*) FROM tabla GROUP BY col1, col2 HAVING COUNT(*) > 1",
+                "Resultado esperado: cero filas retornadas (indica que no hay duplicados)",
+                "Documentar todas las combinaciones que cumplen minimalidad: no se puede eliminar ninguna columna sin perder unicidad",
+                "Considerar columnas con NULL: en PostgreSQL y MySQL, NULL no viola restricción UNIQUE (múltiples NULLs permitidos)"
+              ]
+            },
+            {
+              "id": "step_2",
+              "label": "Verificar la propiedad de minimalidad en cada clave candidata identificada",
+              "description": "Se valida que cada clave candidata sea el conjunto mínimo de columnas necesario para garantizar unicidad. Esto significa que no se puede eliminar ninguna columna sin perder la capacidad de identificar de forma única cada fila. La minimalidad es crítica porque una clave candidata que contiene columnas innecesarias no es verdaderamente candidata.",
+              "type": "proceso",
+              "key_points": [
+                "Para cada clave candidata compuesta, remover una columna a la vez y ejecutar: SELECT col_subset, COUNT(*) FROM tabla GROUP BY col_subset HAVING COUNT(*) > 1",
+                "Si la consulta retorna filas, la columna removida es necesaria (la clave es minimal)",
+                "Si la consulta retorna cero filas, la columna removida es redundante (la clave NO es minimal, descartar)",
+                "Documentar: 'Clave candidata CC1: (emp_id, dept_id) es minimal porque remover cualquier columna genera duplicados'",
+                "CUIDADO: Una clave candidata no minimal no puede ser considerada como tal; debe descartarse del análisis"
+              ]
+            },
+            {
+              "id": "step_3",
+              "label": "Documentar todas las claves candidatas válidas con sus características de nulabilidad",
+              "description": "Se registra formalmente cada clave candidata identificada, incluyendo su composición, restricciones de nulabilidad y comportamiento en el motor de base de datos específico. Esta documentación es esencial porque la clave primaria será seleccionada de este conjunto, y la nulabilidad afecta directamente la integridad referencial y las operaciones de búsqueda.",
+              "type": "proceso",
+              "key_points": [
+                "Formato de documentación: 'CC1: (employee_id) - NOT NULL, UNIQUE, tipo INT, motor: PostgreSQL 14'",
+                "Formato de documentación: 'CC2: (email) - NOT NULL, UNIQUE, tipo VARCHAR(255), motor: PostgreSQL 14'",
+                "Verificar restricción NOT NULL: ejecutar SELECT COUNT(*) FROM tabla WHERE col IS NULL; resultado debe ser 0",
+                "Registrar comportamiento de NULL en el motor: 'PostgreSQL: múltiples NULLs permitidos en UNIQUE; MySQL: igual comportamiento'",
+                "Crear tabla de comparación: columnas (Clave_Candidata, Columnas, Nulabilidad, Tipo_Dato, Restricciones)"
+              ]
+            },
+            {
+              "id": "step_4",
+              "label": "Seleccionar la clave primaria del conjunto de claves candidatas según criterios de negocio",
+              "description": "Se elige una única clave candidata para ser designada como clave primaria (Primary Key). Esta selección no es técnica sino estratégica: la clave primaria debe ser NOT NULL obligatoriamente, estable (no cambiar durante la vida del registro), y preferentemente simple (una sola columna) para optimizar operaciones de búsqueda y referencias externas. Las claves candidatas no seleccionadas pueden convertirse en claves únicas alternativas.",
+              "type": "decision",
+              "key_points": [
+                "Criterios de selección: estabilidad (no cambia), simplicidad (preferir columna única), performance (índice eficiente), semántica (identificador natural vs surrogate)",
+                "Ejemplo: entre CC1(employee_id) y CC2(email), seleccionar employee_id como PK porque email puede cambiar (inestable)",
+                "La clave primaria DEBE tener restricción NOT NULL: ALTER TABLE tabla ADD CONSTRAINT pk_tabla PRIMARY KEY (columna)",
+                "Documentar decisión: 'PK seleccionada: employee_id porque es estable, simple y no nula. CC2(email) se convierte en UNIQUE KEY alternativa'",
+                "CUIDADO: Una clave primaria no puede ser NULL en ningún registro; esto viola la integridad de la entidad"
+              ]
+            },
+            {
+              "id": "step_5",
+              "label": "Implementar la clave primaria con restricción NOT NULL y crear índice asociado",
+              "description": "Se ejecuta la definición formal de la clave primaria en el motor de base de datos, asegurando que se cree automáticamente un índice único y que se aplique la restricción NOT NULL. La clave primaria es el mecanismo de integridad de entidad que garantiza que cada fila es identificable de forma única y que no puede haber valores nulos.",
+              "type": "proceso",
+              "key_points": [
+                "Sintaxis PostgreSQL: ALTER TABLE employees ADD CONSTRAINT pk_employees PRIMARY KEY (employee_id)",
+                "Sintaxis MySQL: ALTER TABLE employees ADD PRIMARY KEY (employee_id)",
+                "Verificar creación de índice: SELECT * FROM information_schema.statistics WHERE table_name='employees' AND column_name='employee_id'",
+                "Resultado esperado: índice con nombre 'PRIMARY' o 'pk_employees' creado automáticamente",
+                "Validar restricción NOT NULL: SELECT COUNT(*) FROM employees WHERE employee_id IS NULL; debe retornar 0"
+              ]
+            },
+            {
+              "id": "step_6",
+              "label": "Convertir claves candidatas no seleccionadas en restricciones UNIQUE KEY",
+              "description": "Las claves candidatas que no fueron elegidas como primaria se implementan como claves únicas alternativas (UNIQUE KEY). Esto preserva la capacidad de identificación única de esas columnas y permite que sean usadas como referencias externas en otras tablas, aunque la clave primaria siga siendo el identificador principal. Las claves únicas alternativas son críticas para la integridad referencial flexible.",
+              "type": "proceso",
+              "key_points": [
+                "Sintaxis: ALTER TABLE employees ADD CONSTRAINT uk_employees_email UNIQUE (email)",
+                "Para claves compuestas: ALTER TABLE orders ADD CONSTRAINT uk_orders_customer_date UNIQUE (customer_id, order_date)",
+                "Verificar creación: SELECT * FROM information_schema.table_constraints WHERE table_name='employees' AND constraint_type='UNIQUE'",
+                "CUIDADO: UNIQUE KEY permite múltiples NULLs en PostgreSQL/MySQL (diferente de PK que no permite ninguno)",
+                "Documentar: 'UK1: email (alternativa a PK), UK2: (customer_id, order_date) para evitar duplicados de pedidos por fecha'"
+              ]
+            },
+            {
+              "id": "step_7",
+              "label": "[inferido] Definir integridad referencial usando la clave primaria como referencia externa",
+              "description": "Se establecen relaciones entre tablas mediante claves foráneas (Foreign Keys) que apuntan a la clave primaria de la tabla referenciada. La clave primaria es el único identificador válido para crear referencias externas porque garantiza unicidad y no nulabilidad. Las claves candidatas alternativas (UNIQUE KEY) pueden usarse como referencias solo en casos específicos donde se requiera flexibilidad.",
+              "type": "proceso",
+              "key_points": [
+                "Sintaxis: ALTER TABLE orders ADD CONSTRAINT fk_orders_employee FOREIGN KEY (employee_id) REFERENCES employees(employee_id)",
+                "La columna referenciada DEBE ser clave primaria o UNIQUE KEY: SELECT constraint_type FROM information_schema.table_constraints WHERE table_name='employees' AND column_name='employee_id'",
+                "Verificar integridad referencial: SELECT * FROM orders WHERE employee_id NOT IN (SELECT employee_id FROM employees)",
+                "Resultado esperado: cero filas (no hay orfandad de registros)",
+                "Configurar acciones: ON DELETE CASCADE o ON DELETE RESTRICT según política de negocio"
+              ]
+            },
+            {
+              "id": "step_8",
+              "label": "Validar que la clave primaria no contiene valores duplicados ni nulos en datos existentes",
+              "description": "Se ejecuta una validación exhaustiva de los datos existentes en la tabla para asegurar que la clave primaria seleccionada cumple con sus restricciones antes de aplicarla formalmente. Esta validación previene errores de integridad que podrían bloquear la aplicación de la restricción PRIMARY KEY.",
+              "type": "proceso",
+              "key_points": [
+                "Consulta de duplicados: SELECT employee_id, COUNT(*) FROM employees GROUP BY employee_id HAVING COUNT(*) > 1",
+                "Consulta de nulos: SELECT COUNT(*) FROM employees WHERE employee_id IS NULL",
+                "Consulta combinada: SELECT employee_id, COUNT(*) as cnt FROM employees GROUP BY employee_id HAVING COUNT(*) > 1 OR employee_id IS NULL",
+                "Resultado esperado: cero filas retornadas en ambas consultas",
+                "Si hay violaciones: ejecutar DELETE FROM employees WHERE employee_id IS NULL; DELETE FROM employees WHERE employee_id IN (SELECT employee_id FROM employees GROUP BY employee_id HAVING COUNT(*) > 1)"
+              ]
+            },
+            {
+              "id": "step_9",
+              "label": "Documentar la diferencia conceptual entre clave primaria y clave candidata en el modelo de datos",
+              "description": "Se registra formalmente en la documentación del modelo de datos la distinción entre clave primaria (PK) y claves candidatas (CC), explicando que la PK es una selección específica de una CC, mientras que las CC no seleccionadas pueden convertirse en claves únicas alternativas. Esta documentación es esencial para que otros desarrolladores comprendan la estructura de integridad de la tabla.",
+              "type": "proceso",
+              "key_points": [
+                "Documento: 'Tabla EMPLOYEES: PK=employee_id (seleccionada por estabilidad y simplicidad). CC1=employee_id (seleccionada como PK). CC2=email (convertida a UNIQUE KEY). CC3=ssn (convertida a UNIQUE KEY).'",
+                "Explicar: 'Clave Primaria: identificador único obligatorio, NOT NULL, usado para integridad de entidad e integridad referencial. Clave Candidata: cualquier columna o combinación que podría ser PK pero no fue seleccionada.'",
+                "Incluir tabla comparativa: Propiedad | Clave Primaria | Clave Candidata | Valores NULL | No | Sí (depende del motor) | Unicidad | Obligatoria | Obligatoria | Cantidad por tabla | 1 | N (múltiples)",
+                "Registrar restricciones: 'PK: NOT NULL + UNIQUE + INDEX automático. CC: UNIQUE + INDEX opcional + permite NULL'",
+                "Versionar documento: incluir fecha, autor, versión del motor de BD, cambios realizados"
+              ]
+            },
+            {
+              "id": "step_10",
+              "label": "Crear índices optimizados en claves candidatas para operaciones de búsqueda frecuentes",
+              "description": "Se generan índices explícitos en las claves candidatas no seleccionadas como primaria para optimizar consultas de búsqueda que usen esas columnas como criterio. Aunque la clave primaria crea automáticamente un índice, las claves candidatas alternativas requieren índices manuales para garantizar performance en operaciones de filtrado y join.",
+              "type": "proceso",
+              "key_points": [
+                "Sintaxis: CREATE UNIQUE INDEX idx_employees_email ON employees(email)",
+                "Para claves compuestas: CREATE UNIQUE INDEX idx_orders_customer_date ON orders(customer_id, order_date)",
+                "Verificar índices creados: SELECT * FROM information_schema.statistics WHERE table_name='employees'",
+                "Analizar plan de ejecución: EXPLAIN SELECT * FROM employees WHERE email='user@example.com'; debe mostrar 'Index Scan' o 'Index Seek'",
+                "CUIDADO: Índices en claves candidatas consumen espacio en disco; evaluar trade-off entre performance de lectura y costo de almacenamiento"
+              ]
+            },
+            {
+              "id": "step_11",
+              "label": "Validar restricciones de integridad referencial en cascada desde la clave primaria",
+              "description": "Se verifica que todas las claves foráneas que referencian la clave primaria funcionan correctamente y que las políticas de eliminación/actualización en cascada se aplican según lo esperado. Esta validación asegura que la integridad referencial se mantiene cuando se modifican registros en la tabla principal.",
+              "type": "proceso",
+              "key_points": [
+                "Listar todas las FK que referencian la PK: SELECT * FROM information_schema.referential_constraints WHERE unique_constraint_table_name='employees'",
+                "Verificar orfandad: SELECT * FROM orders WHERE employee_id NOT IN (SELECT employee_id FROM employees)",
+                "Probar cascada: DELETE FROM employees WHERE employee_id=1; verificar que los pedidos asociados se eliminaron (si ON DELETE CASCADE)",
+                "Probar restricción: DELETE FROM employees WHERE employee_id=2; debe fallar si existen pedidos asociados (si ON DELETE RESTRICT)",
+                "Resultado esperado: cero filas orfanas después de operaciones de eliminación/actualización"
+              ]
+            },
+            {
+              "id": "step_12",
+              "label": "Documentar decisiones de diseño y crear matriz de trazabilidad entre claves y restricciones",
+              "description": "Se genera un documento final que registra todas las decisiones de diseño tomadas, incluyendo por qué se seleccionó una clave candidata específica como primaria, qué claves candidatas se convirtieron en UNIQUE KEY, y cómo se implementó la integridad referencial. Esta matriz de trazabilidad es crítica para auditoría, mantenimiento futuro y onboarding de nuevos desarrolladores.",
+              "type": "fin",
+              "key_points": [
+                "Matriz de trazabilidad: Columnas (Clave_Candidata, Tipo_Restricción, Nulabilidad, Índice, Razón_Selección, Fecha_Implementación, Responsable)",
+                "Ejemplo fila: 'employee_id | PRIMARY KEY | NOT NULL | idx_pk_employee_id | Estable, simple, no cambia | 2024-01-15 | DBA_Senior'",
+                "Incluir diagrama ER actualizado mostrando PK, UK, y FK con sus relaciones",
+                "Documentar excepciones: 'CC3(ss"
+              ]
+            }
+          ]
+        },
+        "steps": [
+          "Identificar todas las columnas candidatas que cumplen unicidad en la tabla",
+          "Verificar la propiedad de minimalidad en cada clave candidata identificada",
+          "Documentar todas las claves candidatas válidas con sus características de nulabilidad",
+          "Seleccionar la clave primaria del conjunto de claves candidatas según criterios de negocio",
+          "Implementar la clave primaria con restricción NOT NULL y crear índice asociado",
+          "Convertir claves candidatas no seleccionadas en restricciones UNIQUE KEY",
+          "[inferido] Definir integridad referencial usando la clave primaria como referencia externa",
+          "Validar que la clave primaria no contiene valores duplicados ni nulos en datos existentes",
+          "Documentar la diferencia conceptual entre clave primaria y clave candidata en el modelo de datos",
+          "Crear índices optimizados en claves candidatas para operaciones de búsqueda frecuentes",
+          "Validar restricciones de integridad referencial en cascada desde la clave primaria",
+          "Documentar decisiones de diseño y crear matriz de trazabilidad entre claves y restricciones"
+        ],
+        "expected_steps": [
+          "Definir llave candidata",
+          "Definir llave primaria",
+          "Comparar características",
+          "Identificar llaves alternativas"
+        ],
+        "classic": {
+          "relevance": {
+            "score": 7,
+            "justification": "El roadmap aborda la diferencia entre clave primaria y candidata, pero se enfoca más en el proceso técnico de implementación que en explicar conceptualmente la diferencia fundamental. La respuesta esperada es simple: 'todas las primarias son candidatas, pero no al revés'. El roadmap lo cubre implícitamente en el paso 4 y 9, pero no de forma directa."
+          },
+          "completeness": {
+            "score": 8,
+            "justification": "El roadmap incluye 12 pasos que cubren identificación, validación, selección, implementación y documentación. Cubre el ciclo completo desde análisis hasta validación. Sin embargo, falta un paso explícito que resuma la diferencia conceptual antes de los pasos técnicos."
+          },
+          "coherence": {
+            "score": 8,
+            "justification": "Los pasos siguen una secuencia lógica: identificar → validar → documentar → seleccionar → implementar → crear restricciones → validar. La progresión es clara y cada paso prepara el siguiente. El paso 9 sobre documentación conceptual llega tarde (debería ser más temprano)."
+          },
+          "technical_accuracy": {
+            "score": 9,
+            "justification": "Los detalles técnicos son correctos: queries SQL para verificar unicidad, concepto de minimalidad, manejo de NULLs en restricciones UNIQUE, creación de índices, integridad referencial. Las consultas SQL son válidas. Nota: el paso 3 está incompleto en el texto proporcionado."
+          },
+          "context_fidelity": {
+            "score": 8,
+            "justification": "El roadmap se basa fielmente en el contexto RAG: define correctamente llave candidata (unicidad + minimalidad), explica que una tabla puede tener varias candidatas, que se elige una como primaria, y las demás son alternativas. No inventa datos, pero expande significativamente con detalles de implementación no presentes en el contexto."
+          },
+          "summary": "El roadmap es técnicamente sólido y cubre el ciclo completo de implementación. Responde la pregunta de forma indirecta a través de los pasos, especialmente el 4 y 9. La coherencia es buena, aunque la diferencia conceptual fundamental podría presentarse más explícitamente al inicio."
+        },
+        "sequence_eval": {
+          "score": 9,
+          "is_valid": true,
+          "out_of_order_steps": [],
+          "suggested_fix": "Orden correcto",
+          "explanation": "Las dependencias causales son válidas: (1) identificar candidatas → (2) verificar minimalidad → (3) documentar → (4) seleccionar primaria → (5) implementar primaria → (6) crear UNIQUE en alternativas → (7) integridad referencial → (8) validar datos existentes → (9) documentar diferencia → (10) crear índices → (11) validar cascada → (12) documentar decisiones. Cada paso depende del anterior, sin violaciones de causalidad. El paso 9 (documentación conceptual) podría estar antes, pero no viola dependencias causales."
+        },
+        "mese": {
+          "mapping": 9,
+          "mapping_justification": "Contenido factualmente correcto según contexto RAG: define unicidad y minimalidad correctamente, explica que una primaria se elige de las candidatas, menciona llaves alternativas, queries SQL válidas, manejo correcto de NULLs. No hay afirmaciones falsas. Única debilidad: paso 3 incompleto en el texto.",
+          "exhaustiveness": 8,
+          "exhaustiveness_justification": "Cubre pasos esenciales: identificación, validación, selección, implementación, restricciones, integridad referencial, validación y documentación. Pasos potencialmente faltantes: (a) explicación conceptual clara de la diferencia antes de pasos técnicos, (b) consideración de cambios de clave primaria en datos existentes, (c) testing de restricciones.",
+          "sequence": 9,
+          "sequence_justification": "Dependencias causales correctas. No hay paso que requiera resultado de paso posterior. Flujo: análisis → validación → selección → implementación → restricciones → integridad → validación → documentación. Orden lógico sin violaciones.",
+          "experience": 8,
+          "experience_justification": "Pasos mayormente accionables con detalles específicos (queries SQL, comandos, criterios de validación). Debilidades: paso 3 incompleto, paso 4 'criterios de negocio' es vago, paso 9 'documentar diferencia conceptual' carece de formato específico. Pasos 1, 2, 5, 6, 8, 10, 11, 12 son claros y ejecutables.",
+          "composite": 8.6
+        },
+        "structure": {
+          "score": 7.55,
+          "verdict": "PASS",
+          "passed": 9,
+          "total_checks": 12,
+          "pass_rate": 0.75,
+          "checks": [
+            {
+              "name": "step_count",
+              "passed": true,
+              "detail": "12 pasos (requiere 6-12)",
+              "weight": 1.5
+            },
+            {
+              "name": "has_title",
+              "passed": true,
+              "detail": "Título: 'Roadmap Técnico: Diferenciación entre Clave Primaria y Clave'",
+              "weight": 1.0
+            },
+            {
+              "name": "unique_ids",
+              "passed": true,
+              "detail": "IDs únicos",
+              "weight": 1.0
+            },
+            {
+              "name": "single_inicio",
+              "passed": false,
+              "detail": "Nodos 'inicio': 0 (debe ser 1)",
+              "weight": 1.2
+            },
+            {
+              "name": "single_fin",
+              "passed": true,
+              "detail": "Nodos 'fin': 1 (debe ser 1)",
+              "weight": 1.2
+            },
+            {
+              "name": "starts_with_inicio",
+              "passed": false,
+              "detail": "Primer paso tipo 'proceso' (debe ser 'inicio')",
+              "weight": 1.0
+            },
+            {
+              "name": "ends_with_fin",
+              "passed": true,
+              "detail": "Último paso tipo 'fin' (debe ser 'fin')",
+              "weight": 1.0
+            },
+            {
+              "name": "valid_types",
+              "passed": true,
+              "detail": "Todos los tipos son válidos",
+              "weight": 1.0
+            },
+            {
+              "name": "key_points_count",
+              "passed": true,
+              "detail": "Todos tienen 3-5 key_points",
+              "weight": 1.5
+            },
+            {
+              "name": "label_action_verb",
+              "passed": false,
+              "detail": "Sin verbo de acción: ['Convertir claves candidatas no seleccionadas en restriccione', '[inferido] Definir integridad referencial usando la clave pr']",
+              "weight": 1.2
+            },
+            {
+              "name": "description_min_length",
+              "passed": true,
+              "detail": "Todas las descripciones tienen >=2 oraciones",
+              "weight": 1.3
+            },
+            {
+              "name": "no_empty_fields",
+              "passed": true,
+              "detail": "Sin campos vacíos",
+              "weight": 1.0
+            }
+          ],
+          "violations": [
+            "Nodos 'inicio': 0 (debe ser 1)",
+            "Primer paso tipo 'proceso' (debe ser 'inicio')",
+            "Sin verbo de acción: ['Convertir claves candidatas no seleccionadas en restriccione', '[inferido] Definir integridad referencial usando la clave pr']"
+          ]
+        },
+        "similarity": {
+          "tfidf": 0.1444,
+          "semantic": 0.594,
+          "semantic_0_10": 5.94,
+          "gain": 0.4496,
+          "interpretation": "Relevancia media — la respuesta se relaciona pero podría estar más enfocada"
+        },
+        "response_time": 33.77,
+        "overall_score": 8.0,
         "verdict": "PASS",
         "mese_verdict": "PASS"
       }
     ],
     "aggregated": {
-      "overall_score": 8.8,
+      "overall_score": 8.53,
       "classic": {
-        "relevance": 9.0,
+        "relevance": 8.33,
         "completeness": 8.0,
-        "coherence": 9.0,
+        "coherence": 8.67,
         "technical_accuracy": 9.0,
-        "context_fidelity": 9.0
+        "context_fidelity": 8.67
       },
       "mese": {
         "mapping": 9.0,
-        "exhaustiveness": 8.0,
-        "sequence": 9.0,
-        "experience": 8.0,
-        "composite": 8.6
+        "exhaustiveness": 8.33,
+        "sequence": 9.67,
+        "experience": 8.67,
+        "composite": 9.03
       },
       "sequence": {
-        "mean_score": 9.0,
+        "mean_score": 9.67,
         "valid_pct": 1.0
       },
       "structure": {
-        "mean_score": 9.14,
+        "mean_score": 8.61,
         "pass_rate": 1.0
       },
       "similarity": {
-        "mean_semantic": 0.6322,
-        "mean_tfidf": 0.3571
+        "mean_semantic": 0.635,
+        "mean_tfidf": 0.2256
       },
       "response_time": {
-        "mean_s": 35.77,
-        "max_s": 35.77,
-        "min_s": 35.77
+        "mean_s": 31.78,
+        "max_s": 33.77,
+        "min_s": 28.5
       }
     },
     "pass_rate": 1.0,
@@ -373,7 +1011,7 @@
   "corpus": null,
   "config": {
     "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "n_samples": 1,
+    "n_samples": 3,
     "mese_weights": {
       "mapping": 0.25,
       "exhaustiveness": 0.2,
