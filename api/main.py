@@ -64,6 +64,20 @@ async def generate_roadmap_endpoint(request: QueryRequest):
     return engine.generate_roadmap(request.question)
 
 
+@app.post("/sync-notion")
+async def sync_notion_endpoint():
+    global engine
+
+    try:
+        from src.ingest_notion import sync_notion_to_chroma
+
+        sync_notion_to_chroma()
+        engine = RagEngine()
+        return {"status": "ok", "message": "Notion sincronizado en ChromaDB"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Laboratorio de evaluacion paso a paso
 
 class PipelineRequest(BaseModel):
