@@ -1,46 +1,178 @@
 ﻿N°,Pregunta,Categoría,Pasos generados (en orden),Pasos esperados,Score MESE,Score Secuencia,Secuencia válida (IA),Pasos fuera de orden (IA),Sugerencia de reorden (IA),Nota Humana Secuencia (0-10),Nota Humana General (0-10),¿Aprobar? (Si/No),Comentarios del Revisor
-1,¿Qué es una llave candidata en bases de datos?,bases_de_datos,"1. Definir el conjunto de atributos candidatos para clave candidata
-2. Verificar la propiedad de unicidad en cada columna candidata
-3. Verificar la propiedad de minimalidad del conjunto de atributos
-4. Documentar todas las claves candidatas identificadas
-5. Seleccionar la clave primaria del conjunto de claves candidatas
-6. Definir restricciones UNIQUE para claves alternas
-7. [inferido] Validar dependencias funcionales entre claves candidatas
-8. Implementar índices para optimizar búsquedas por claves candidatas
-9. Documentar diferencias entre clave primaria y claves alternas en el esquema
-10. Validar integridad referencial usando claves candidatas en relaciones
-11. Ejecutar pruebas de unicidad y minimalidad en datos de producción
-12. Documentar decisiones de diseño en especificación técnica final","1. Definir el concepto de llave
+1,¿Qué es una llave candidata en bases de datos?,bases_de_datos,"1. Definir formalmente el conjunto de atributos candidatos
+2. Verificar la propiedad de unicidad en cada atributo candidato
+3. Validar la propiedad de minimalidad del conjunto candidato
+4. Compilar el conjunto de todas las claves candidatas válidas
+5. Diferenciar clave primaria de claves alternas
+6. Implementar restricciones de clave candidata en el motor de base de datos
+7. [inferido] Documentar la normalización del esquema respecto a claves candidatas
+8. Validar integridad referencial usando claves candidatas en relaciones foráneas
+9. Optimizar índices basados en claves candidatas para consultas frecuentes
+10. Documentar dependencias funcionales derivadas de claves candidatas
+11. Ejecutar pruebas de integridad de claves candidatas en datos históricos
+12. Comunicar decisiones de claves candidatas a stakeholders técnicos y de negocio","1. Definir el concepto de llave
 2. Identificar atributos únicos
 3. Verificar minimalidad
-4. Seleccionar llave primaria",9.15,10,Sí,—,Orden correcto,,,,
-2,¿Cómo se identifican las llaves candidatas en una tabla?,bases_de_datos,"1. Analizar la estructura de la tabla y documentar atributos potenciales
-2. Verificar la propiedad de no nulidad en cada columna candidata
+4. Seleccionar llave primaria",8.95,10,Sí,—,Orden correcto,,,,
+2,¿Cómo se identifican las llaves candidatas en una tabla?,bases_de_datos,"1. Analizar la estructura de la tabla y documentar atributos
+2. Verificar la propiedad de no nulidad en columnas candidatas
 3. Verificar la propiedad de unicidad en cada columna candidata
 4. Identificar dependencias funcionales entre atributos
-5. [inferido] Validar la irreductibilidad de claves candidatas compuestas
-6. Comparar claves candidatas identificadas y documentar sus características
-7. Seleccionar la clave primaria entre las candidatas identificadas
-8. Crear índices UNIQUE para claves candidatas no seleccionadas
-9. Validar integridad referencial con claves candidatas en relaciones
-10. Documentar el diccionario de datos con claves candidatas
-11. Ejecutar pruebas de integridad y consistencia de claves candidatas
-12. Revisar y ajustar claves candidatas según evolución del negocio","1. Listar atributos de la tabla
+5. Validar unicidad de claves compuestas candidatas
+6. Documentar todas las claves candidatas identificadas
+7. [inferido] Evaluar estabilidad y minimalidad de claves candidatas
+8. Seleccionar la clave primaria entre las candidatas
+9. Crear índices para claves candidatas alternativas
+10. Validar integridad referencial con claves candidatas
+11. Documentar el modelo de claves en el esquema de base de datos
+12. Ejecutar pruebas de integridad y verificar restricciones","1. Listar atributos de la tabla
 2. Verificar unicidad por atributo
 3. Verificar minimalidad
-4. Documentar llaves candidatas encontradas",9.35,10,Sí,—,Orden correcto,,,,
-3,¿Cuál es la diferencia entre llave primaria y llave candidata?,bases_de_datos,"1. Identificar todas las columnas candidatas que cumplen unicidad en la tabla
-2. Verificar la propiedad de minimalidad en cada clave candidata identificada
-3. Documentar todas las claves candidatas válidas con sus características de nulabilidad
-4. Seleccionar la clave primaria del conjunto de claves candidatas según criterios de negocio
-5. Implementar la clave primaria con restricción NOT NULL y crear índice asociado
-6. Convertir claves candidatas no seleccionadas en restricciones UNIQUE KEY
-7. [inferido] Definir integridad referencial usando la clave primaria como referencia externa
-8. Validar que la clave primaria no contiene valores duplicados ni nulos en datos existentes
-9. Documentar la diferencia conceptual entre clave primaria y clave candidata en el modelo de datos
-10. Crear índices optimizados en claves candidatas para operaciones de búsqueda frecuentes
-11. Validar restricciones de integridad referencial en cascada desde la clave primaria
-12. Documentar decisiones de diseño y crear matriz de trazabilidad entre claves y restricciones","1. Definir llave candidata
+4. Documentar llaves candidatas encontradas",9.15,10,Sí,—,Orden correcto,,,,
+3,¿Cuál es la diferencia entre llave primaria y llave candidata?,bases_de_datos,"1. Identificar todas las claves candidatas en la tabla
+2. Verificar la propiedad de unicidad en cada columna candidata
+3. Analizar la nulabilidad de cada clave candidata
+4. Seleccionar la clave primaria entre las claves candidatas
+5. Implementar restricciones UNIQUE para claves candidatas alternas
+6. Implementar la restricción PRIMARY KEY
+7. Definir relaciones de integridad referencial usando la clave primaria
+8. Documentar diferencias funcionales entre clave primaria y claves candidatas
+9. [inferido] Optimizar índices para claves candidatas en consultas frecuentes
+10. [inferido] Validar integridad de claves candidatas en datos históricos
+11. [inferido] Implementar auditoría de cambios en clave primaria
+12. Crear documentación de decisiones de diseño para futuras migraciones","1. Definir llave candidata
 2. Definir llave primaria
 3. Comparar características
-4. Identificar llaves alternativas",8.6,9,Sí,—,Orden correcto,,,,
+4. Identificar llaves alternativas",9.35,10,Sí,—,Orden correcto,,,,
+4,¿Cuál es la complejidad en tiempo de las operaciones en Power Query?,power_query,"1. Clasificar operaciones por complejidad asintótica Big-O
+2. Analizar el impacto del motor lazy evaluation en la complejidad temporal
+3. Evaluar complejidad de operaciones de filtrado con condiciones complejas
+4. Analizar complejidad de operaciones de agrupación y agregación
+5. Evaluar complejidad de operaciones de combinación de tablas (Join)
+6. Analizar complejidad de operaciones de ordenación
+7. Evaluar complejidad de transformaciones de datos y funciones personalizadas
+8. Documentar optimizaciones de query folding por tipo de operación
+9. Crear matriz de complejidad temporal para combinaciones de operaciones
+10. Establecer benchmarks de rendimiento por rango de tamaño de datos
+11. Desarrollar guía de optimización basada en complejidad temporal
+12. Validar y documentar hallazgos en matriz de referencia final","1. Entender el modelo de evaluación lazy
+2. Analizar complejidad de filtrado
+3. Analizar complejidad de merge/join
+4. Analizar complejidad de agrupación
+5. Aplicar optimizaciones",9.1,10,Sí,—,Orden correcto,,,,
+5,¿Cómo optimizar una consulta lenta en Power Query?,power_query,"1. Diagnosticar operaciones que rompen query folding
+2. Aplicar filtros nativos antes de transformaciones complejas
+3. Reemplazar funciones personalizadas por operaciones nativas
+4. Optimizar operaciones de Merge/Join con índices en fuente
+5. Reducir transformaciones de Pivot/Unpivot a operaciones únicas
+6. Eliminar expansión de tablas anidadas innecesarias
+7. [inferido] Implementar caché de consultas intermedias
+8. Configurar paralelización de cargas ETL con múltiples consultas
+9. Aplicar compresión y reducción de tipos de datos
+10. Usar DirectQuery para datasets muy grandes (> 1GB)
+11. Implementar particionamiento de consultas por rango de datos
+12. Validar mejoras con métricas de rendimiento y benchmarking","1. Diagnosticar consulta con el Performance Analyzer
+2. Aplicar filtros al inicio del pipeline
+3. Eliminar columnas innecesarias
+4. Revisar y corregir tipos de datos
+5. Deshabilitar cargas de tablas intermedias
+6. Medir y comparar mejora",8.7,10,Sí,—,Orden correcto,,,,
+6,¿Cómo crear un flujo con agentes IA en N8N?,n8n_ia,"1. Configurar credenciales y conexión del modelo LLM en N8N
+2. Diseñar la estructura del agente IA con definición clara de herramientas (Tools)
+3. Crear nodo Agent en N8N con configuración de modelo y parámetros de razonamiento
+4. Implementar Model Context Protocol (MCP) para comunicación estructurada entre agente y herramientas
+5. Configurar gestión de estado y contexto conversacional del agente
+6. Encadenar tareas mediante nodos de decisión y condicionales basados en salida del agente
+7. Integrar APIs externas (Notion, Google Calendar, etc.) como Tools del agente
+8. [inferido] Implementar logging y auditoría de decisiones del agente para trazabilidad
+9. Validar y testear flujo del agente con casos de prueba determinísticos
+10. Implementar mecanismo de fallback y recuperación ante errores del agente
+11. Optimizar prompts del agente mediante iteración y análisis de comportamiento
+12. Desplegar flujo del agente en producción con monitoreo continuo y gobernanza","1. Crear nuevo workflow en N8N
+2. Agregar nodo Trigger
+3. Agregar nodo AI Agent
+4. Configurar credenciales del LLM
+5. Definir herramientas del agente
+6. Configurar memoria conversacional
+7. Activar y probar el flujo",8.9,10,Sí,—,Orden correcto,,,,
+7,¿Cómo testear un flujo de agente IA en N8N?,n8n_ia,"1. Diseñar la arquitectura del flujo con separación de responsabilidades
+2. Configurar fixtures y datos de prueba para reproducibilidad
+3. Implementar validación de outputs del agente antes de ejecución
+4. Mockear dependencias externas (APIs, bases de datos) para tests unitarios
+5. Ejecutar tests unitarios validando cada nodo independientemente
+6. Validar manejo de errores y casos de excepción
+7. Ejecutar tests de integración validando flujos entre nodos
+8. Implementar tests end-to-end con datos reales en ambiente de staging
+9. Debuggear flujos complejos usando logging estructurado y breakpoints
+10. Validar gobernanza y auditabilidad de decisiones del agente
+11. Automatizar ejecución de tests con CI/CD pipeline
+12. Documentar casos de prueba y crear matriz de cobertura","1. Activar modo de ejecución manual
+2. Ejecutar el workflow con datos de prueba
+3. Revisar output de cada nodo
+4. Revisar logs de ejecución
+5. Probar casos borde
+6. Documentar resultados",9.15,10,Sí,—,Orden correcto,,,,
+8,¿Qué propiedades debe cumplir una llave candidata?,bases_de_datos,"1. Identificar columnas candidatas para formar la clave
+2. Verificar la propiedad de unicidad en cada columna candidata
+3. Validar la propiedad de minimalidad del conjunto de columnas
+4. Verificar la ausencia de valores nulos en la llave candidata
+5. [inferido] Evaluar la estabilidad temporal de los valores de la llave candidata
+6. Verificar la compatibilidad con integridad referencial
+7. Evaluar el rendimiento de índices sobre la llave candidata
+8. Documentar la llave candidata en el modelo de datos
+9. Seleccionar la clave primaria entre las claves candidatas validadas
+10. Implementar restricciones de clave primaria en la base de datos
+11. Validar integridad referencial con claves foráneas
+12. Ejecutar pruebas de regresión y certificar la llave candidata","1. Definir la propiedad de unicidad
+2. Definir la propiedad de minimalidad
+3. Verificar unicidad en los atributos
+4. Verificar minimalidad del conjunto",9.0,9,Sí,—,Orden correcto,,,,
+9,¿Puede una tabla tener más de una llave candidata?,bases_de_datos,"1. Identificar atributos con potencial de unicidad en la tabla
+2. Verificar la propiedad de unicidad con restricción UNIQUE en cada columna candidata
+3. Documentar todas las claves candidatas identificadas
+4. Seleccionar la clave primaria entre las claves candidatas
+5. Implementar claves únicas (UNIQUE KEY) para las candidatas no seleccionadas
+6. Validar restricciones de integridad referencial con claves foráneas
+7. [inferido] Aplicar normalización de esquema considerando claves candidatas
+8. Crear índices en claves candidatas para optimizar búsquedas
+9. Documentar diferencias entre PRIMARY KEY, UNIQUE KEY y CANDIDATE KEY
+10. Ejecutar pruebas de integridad para validar restricciones
+11. Revisar y optimizar estrategia de claves en contexto de escalabilidad
+12. Documentar decisiones de diseño en especificación técnica del esquema","1. Identificar todos los conjuntos únicos y mínimos
+2. Listar las llaves candidatas
+3. Elegir la llave primaria
+4. Marcar las demás como alternativas",9.35,10,Sí,—,Orden correcto,,,,
+10,¿Qué es la evaluación lazy en Power Query?,power_query,"1. Comprender el modelo de evaluación lazy vs eager en Power Query
+2. Identificar el punto de materialización de datos en el flujo ETL
+3. Analizar el árbol de operaciones generado por Power Query
+4. Aplicar column pruning para eliminar columnas no utilizadas antes de materialización
+5. Implementar predicate pushdown para filtrar datos en la fuente
+6. Medir impacto de lazy evaluation en memoria y tiempo de ejecución
+7. [inferido] Evitar operaciones que fuerzan evaluación eager innecesaria
+8. Optimizar joins y transformaciones para mantener lazy evaluation
+9. Configurar folding en Power Query para maximizar pushdown a la fuente
+10. Diseñar estrategia de caching para consultas intermedias en ETL
+11. Documentar y monitorear cambios en evaluación lazy tras actualizaciones de Power Query
+12. Validar y documentar el impacto de lazy evaluation en el SLA de ETL","1. Entender qué es la evaluación lazy
+2. Identificar cuándo se materializa el resultado
+3. Aprovechar el query folding
+4. Validar el plan de ejecución",8.3,10,Sí,—,Orden correcto,,,,
+11,¿Cómo se conecta un LLM a un agente en N8N?,n8n_ia,1. Error de Sistema,"1. Agregar el nodo Chat Model
+2. Configurar las credenciales de la API
+3. Seleccionar el modelo a usar
+4. Conectar el modelo al nodo AI Agent
+5. Probar la conexión",0.0,0,No,Error de Sistema,"El paso actual no es un paso ejecutable sino un error. Orden correcto debería ser: (1) Agregar nodo Chat Model, (2) Configurar credenciales API, (3) Conectar salida del modelo a entrada Chat Model del nodo AI Agent.",,,,
+12,¿Cómo se agrega memoria conversacional a un agente en N8N?,n8n_ia,"1. Diseñar arquitectura de almacenamiento de contexto conversacional
+2. Configurar nodo de almacenamiento de historial en N8N
+3. Implementar nodo de recuperación de contexto conversacional previo
+4. Inyectar historial conversacional en el prompt del agente
+5. Configurar gestión de sesiones y ciclo de vida de conversaciones
+6. Integrar base de datos vectorial para búsqueda semántica de contexto
+7. Implementar mecanismo de limpieza y rotación de memoria
+8. Configurar reglas de control de contexto y límites de memoria
+9. Definir Tools y MCP para acciones del agente con contexto
+10. Implementar logging y auditoría de decisiones del agente
+11. ","1. Agregar el nodo de memoria
+2. Configurar el tamaño de la ventana
+3. Conectar la memoria al nodo AI Agent
+4. Probar que el agente recuerda el contexto",4.45,7,Sí,—,Orden correcto,,,,

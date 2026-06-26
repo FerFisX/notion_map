@@ -84,6 +84,7 @@ class PipelineRequest(BaseModel):
     question:       str
     rerank:         bool = True
     rerank_method:  str  = "mmr"      # mmr | crossencoder | none
+    web_fallback:   bool = False      # buscar en internet si el corpus no cubre
     run_structure:  bool = True
     run_similarity: bool = True
     run_judge:      bool = False
@@ -143,9 +144,40 @@ async def eval_pipeline(req: PipelineRequest):
         "elapsed_s": round(time.time() - t0, 2),
     })
 
+    contexts = [c["text"] for c in retr["selected"]]
+
+    # Paso 2.5: fallback web (solo si el corpus no cubre la consulta)
+    if req.web_fallback:
+        t0 = time.time()
+        scores  = [c.get("vector_score") for c in retr["pool"] if c.get("vector_score") is not None]
+        best    = max(scores) if scores else 0
+        covers  = engine.corpus_covers(retr)
+        web_used = False
+        web_sources = []
+        if not covers:
+            from src.web_search import search_web
+            web_contexts = search_web(refined, max_results=4)
+            if web_contexts:
+                contexts = web_contexts + contexts
+                web_used = True
+                web_sources = [c.split("\n", 1)[0] for c in web_contexts]
+        steps.append({
+            "key":   "web_fallback",
+            "title": "2.5 Fallback a búsqueda web",
+            "what":  "Si el mejor fragmento del corpus tiene un score bajo, se busca en internet (DuckDuckGo) y se usa ese contenido solo para esta consulta.",
+            "why":   "Permite responder aunque la base de conocimiento no cubra el tema. El contenido es efímero: no se guarda en el corpus.",
+            "result": {
+                "best_corpus_score": round(best, 4),
+                "umbral":            float(__import__("os").getenv("WEB_FALLBACK_THRESHOLD", "0.25")),
+                "corpus_suficiente": covers,
+                "web_activado":      web_used,
+                "fuentes_web":       web_sources,
+            },
+            "elapsed_s": round(time.time() - t0, 2),
+        })
+
     # Paso 3: generacion del roadmap
     t0 = time.time()
-    contexts = [c["text"] for c in retr["selected"]]
     roadmap  = engine.build_roadmap(req.question, refined, contexts)
     answer   = _roadmap_to_text(roadmap)
     steps.append({

@@ -106,6 +106,7 @@
       <option value="crossencoder">Cross-Encoder (más preciso)</option>
       <option value="none">Sin re-ranking</option>
     </select>
+    <label class="opt"><input type="checkbox" id="web_fallback"> Fallback web</label>
     <label class="opt"><input type="checkbox" id="structure" checked> Validar estructura</label>
     <label class="opt"><input type="checkbox" id="similarity" checked> Similitud query-respuesta</label>
     <label class="opt"><input type="checkbox" id="judge"> LLM Judge (lento)</label>
@@ -137,6 +138,7 @@ async function run() {
     question:       $('question').value,
     rerank:         $('rerank').checked,
     rerank_method:  $('method').value,
+    web_fallback:   $('web_fallback').checked,
     run_structure:  $('structure').checked,
     run_similarity: $('similarity').checked,
     run_judge:      $('judge').checked,
@@ -212,6 +214,23 @@ function renderResult(s) {
         <div class="meta-box" style="margin-top:14px"><div class="lbl">Selección final (en orden que pasa al LLM)</div></div>
         <table><thead><tr><th>Rank final</th><th>Rank inicial</th><th>Score</th><th>Fragmento</th></tr></thead>
         <tbody>${sels}</tbody></table>`;
+    }
+
+    case 'web_fallback': {
+      const ok = r.corpus_suficiente;
+      const badge = ok
+        ? `<span class="verdict v-pass">corpus suficiente</span>`
+        : (r.web_activado
+            ? `<span class="verdict" style="background:rgba(108,140,255,.15);color:var(--accent)">web activado</span>`
+            : `<span class="verdict v-fail">sin resultados web</span>`);
+      const fuentes = (r.fuentes_web||[]).map(f=>`<li>${esc(f)}</li>`).join('');
+      return `
+        <div class="bar-wrap"><span class="name">Mejor score corpus</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100,r.best_corpus_score*100)}%;background:${r.corpus_suficiente?'var(--green2)':'var(--red2)'}"></div></div>
+          <span class="num">${r.best_corpus_score}</span></div>
+        <div style="font-size:12.5px;color:var(--muted);margin:6px 0">
+          Umbral: ${r.umbral} &nbsp;|&nbsp; ${badge}</div>
+        ${fuentes ? '<div class="meta-box"><div class="lbl">Fuentes web usadas (efímeras)</div></div><ul style="font-size:12px;padding-left:18px">'+fuentes+'</ul>' : ''}`;
     }
 
     case 'generate': {

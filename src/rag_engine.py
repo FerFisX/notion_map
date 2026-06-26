@@ -20,6 +20,12 @@ RERANK_METHOD = os.getenv("RERANK_METHOD", "mmr").lower().strip()
 POOL_SIZE     = int(os.getenv("RETRIEVAL_POOL_SIZE", "10"))
 TOP_N         = int(os.getenv("RETRIEVAL_TOP_N", "5"))
 
+# Fallback a búsqueda web cuando el corpus local no cubre la consulta.
+# Efímero: lo encontrado se usa solo para esa consulta, no se guarda en ChromaDB.
+# Apagado por defecto para que la evaluación siga siendo reproducible.
+WEB_FALLBACK     = os.getenv("WEB_FALLBACK", "false").lower().strip() in ("true", "1", "yes")
+WEB_FALLBACK_MIN = float(os.getenv("WEB_FALLBACK_THRESHOLD", "0.25"))
+
 
 class RoadmapStep(BaseModel):
     id: str = Field(description="ID corto único, ej: 'step_1'")
@@ -166,11 +172,33 @@ class RagEngine:
         result = self.retrieve_contexts_scored(query)
         return [c["text"] for c in result["selected"]]
 
+    def corpus_covers(self, retrieval: dict) -> bool:
+        """True si el corpus local cubre la consulta (hay algún fragmento con score suficiente)."""
+        scores = [c.get("vector_score") for c in retrieval.get("pool", []) if c.get("vector_score") is not None]
+        return bool(scores) and max(scores) >= WEB_FALLBACK_MIN
+
+    def get_contexts(self, refined_query: str) -> list:
+        """
+        Recupera contexto del corpus local. Si está activado el fallback web y el
+        corpus no cubre la consulta, complementa con búsqueda en internet (efímera).
+        """
+        retrieval = self.retrieve_contexts_scored(refined_query)
+        contexts  = [c["text"] for c in retrieval["selected"]]
+
+        if WEB_FALLBACK and not self.corpus_covers(retrieval):
+            best = max((c.get("vector_score") or 0) for c in retrieval["pool"]) if retrieval["pool"] else 0
+            print(f"  [Web Fallback] Corpus insuficiente (mejor score={best:.3f} < {WEB_FALLBACK_MIN}). Buscando en internet...")
+            from src.web_search import search_web
+            web_contexts = search_web(refined_query, max_results=4)
+            if web_contexts:
+                contexts = web_contexts + contexts  # prioriza lo recién encontrado
+        return contexts
+
     def generate_roadmap(self, query: str):
         try:
             refined_query = self.rewrite_query(query)
             print(f"  [Retrieval] Buscando con consulta refinada...")
-            contexts = self.retrieve_contexts(refined_query)
+            contexts = self.get_contexts(refined_query)
             return self.build_roadmap(query, refined_query, contexts)
 
         except Exception as e:

@@ -42,23 +42,25 @@ def run_one(exp: dict, samples: int, mode: str) -> bool:
     cmd = [
         PYTHON, "-m", "evaluation.runner",
         "--mode", mode,
-        "--samples", str(samples),
         "--run-name", exp["run_name"],
     ]
+    if samples:  # si es None/0 se usan todas las muestras del dataset
+        cmd += ["--samples", str(samples)]
     result = subprocess.run(cmd, cwd=BASE_DIR, env=env)
     return result.returncode == 0
 
 
 def main():
     ap = argparse.ArgumentParser(description="Batería de experimentos NotionMap")
-    ap.add_argument("--samples", type=int, default=3, help="Muestras por experimento")
+    ap.add_argument("--samples", type=int, default=None,
+                    help="Muestras por experimento (default: todas las del dataset)")
     ap.add_argument("--mode", default="judge", choices=["judge", "all"],
                     help="judge = LLM Judge (rapido); all = RAGAS + corpus tambien")
     args = ap.parse_args()
 
     print("=" * 60)
     print(f"  BATERIA DE EXPERIMENTOS — {len(EXPERIMENTS)} configuraciones")
-    print(f"  samples={args.samples}  mode={args.mode}")
+    print(f"  samples={args.samples or 'todas'}  mode={args.mode}")
     print("=" * 60)
 
     t0 = time.time()

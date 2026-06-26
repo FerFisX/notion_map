@@ -146,4 +146,125 @@ EVAL_SAMPLES: List[EvalSample] = [
             "Documentar resultados",
         ],
     ),
+
+    # Llaves candidatas (ampliación)
+    EvalSample(
+        question="¿Qué propiedades debe cumplir una llave candidata?",
+        ground_truth=(
+            "Una llave candidata debe cumplir unicidad: no puede haber dos tuplas con "
+            "los mismos valores en los atributos de la llave. Y minimalidad: ningún "
+            "atributo puede eliminarse sin perder la propiedad de unicidad."
+        ),
+        expected_keywords=["unicidad", "minimalidad", "atributos", "tupla", "única"],
+        category="bases_de_datos",
+        expected_step_order=[
+            "Definir la propiedad de unicidad",
+            "Definir la propiedad de minimalidad",
+            "Verificar unicidad en los atributos",
+            "Verificar minimalidad del conjunto",
+        ],
+    ),
+    EvalSample(
+        question="¿Puede una tabla tener más de una llave candidata?",
+        ground_truth=(
+            "Sí, una tabla puede tener varias llaves candidatas. Cada una identifica "
+            "de forma única las filas. De entre todas se elige una como llave primaria "
+            "y las restantes quedan como llaves alternativas."
+        ),
+        expected_keywords=["varias", "candidatas", "primaria", "alternativas", "única"],
+        category="bases_de_datos",
+        expected_step_order=[
+            "Identificar todos los conjuntos únicos y mínimos",
+            "Listar las llaves candidatas",
+            "Elegir la llave primaria",
+            "Marcar las demás como alternativas",
+        ],
+    ),
+
+    # Power Query (ampliación)
+    EvalSample(
+        question="¿Qué es la evaluación lazy en Power Query?",
+        ground_truth=(
+            "La evaluación lazy significa que Power Query no ejecuta las transformaciones "
+            "hasta que se necesita el resultado. Esto permite optimizar el plan de ejecución "
+            "y aplicar query folding delegando operaciones al origen de datos."
+        ),
+        expected_keywords=["lazy", "evaluación", "transformaciones", "query folding", "origen"],
+        category="power_query",
+        expected_step_order=[
+            "Entender qué es la evaluación lazy",
+            "Identificar cuándo se materializa el resultado",
+            "Aprovechar el query folding",
+            "Validar el plan de ejecución",
+        ],
+    ),
+    EvalSample(
+        question="¿Por qué un merge en Power Query puede ser lento?",
+        ground_truth=(
+            "Un merge compara filas entre dos tablas y en el peor caso tiene complejidad "
+            "cuadrática O(n²). Es lento cuando las tablas son grandes, cuando no hay query "
+            "folding y cuando se hace antes de filtrar y reducir columnas."
+        ),
+        expected_keywords=["merge", "join", "O(n²)", "cuadrática", "folding", "filtrar"],
+        category="power_query",
+        expected_step_order=[
+            "Entender el costo de comparar filas",
+            "Reducir filas antes del merge",
+            "Eliminar columnas innecesarias",
+            "Verificar si hay query folding",
+            "Medir el impacto",
+        ],
+    ),
+
+    # N8N con agentes IA (ampliación)
+    EvalSample(
+        question="¿Qué nodos se necesitan para un agente IA en N8N?",
+        ground_truth=(
+            "Se necesita un nodo Trigger para iniciar el flujo, el nodo AI Agent como "
+            "núcleo, un nodo de modelo de lenguaje (Chat Model) conectado al agente, y "
+            "opcionalmente nodos de herramientas y de memoria."
+        ),
+        expected_keywords=["Trigger", "AI Agent", "Chat Model", "herramientas", "memoria"],
+        category="n8n_ia",
+        expected_step_order=[
+            "Agregar nodo Trigger",
+            "Agregar nodo AI Agent",
+            "Conectar el nodo Chat Model",
+            "Agregar nodos de herramientas",
+            "Agregar nodo de memoria",
+        ],
+    ),
+    EvalSample(
+        question="¿Cómo se conecta un LLM a un agente en N8N?",
+        ground_truth=(
+            "Se agrega un nodo Chat Model (por ejemplo OpenAI o Anthropic), se configuran "
+            "las credenciales de la API y se conecta la salida del modelo a la entrada "
+            "de Chat Model del nodo AI Agent."
+        ),
+        expected_keywords=["Chat Model", "credenciales", "API", "AI Agent", "conectar"],
+        category="n8n_ia",
+        expected_step_order=[
+            "Agregar el nodo Chat Model",
+            "Configurar las credenciales de la API",
+            "Seleccionar el modelo a usar",
+            "Conectar el modelo al nodo AI Agent",
+            "Probar la conexión",
+        ],
+    ),
+    EvalSample(
+        question="¿Cómo se agrega memoria conversacional a un agente en N8N?",
+        ground_truth=(
+            "Se añade un nodo de memoria (por ejemplo Window Buffer Memory) y se conecta "
+            "a la entrada de memoria del nodo AI Agent. Esto permite que el agente recuerde "
+            "los mensajes anteriores de la conversación."
+        ),
+        expected_keywords=["memoria", "Window Buffer", "AI Agent", "conversación", "mensajes"],
+        category="n8n_ia",
+        expected_step_order=[
+            "Agregar el nodo de memoria",
+            "Configurar el tamaño de la ventana",
+            "Conectar la memoria al nodo AI Agent",
+            "Probar que el agente recuerda el contexto",
+        ],
+    ),
 ]
