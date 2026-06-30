@@ -386,6 +386,8 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
 <!-- LLM Judge + Tabla Humana -->
 <h2>LLM Judge + Revisión Humana</h2>
 <p style="font-size:13px;color:#888;margin-bottom:12px">
+  Las 4 dimensiones MESE (Mapping, Exhaustiveness, Sequence, Experience) siguen el
+  principio MECE: mutuamente excluyentes y colectivamente exhaustivas.<br>
   Completa las columnas amarillas y exporta con el botón.
 </p>
 <div style="overflow-x:auto">

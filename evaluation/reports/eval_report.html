@@ -33,58 +33,58 @@
 <body>
 
 <h1>NotionMap — Reporte de Evaluación</h1>
-<div class="meta">Generado: 26/06/2026 11:20 &nbsp;|&nbsp; Modelo: us.anthropic.claude-haiku-4-5-20251001-v1:0</div>
+<div class="meta">Generado: 29/06/2026 12:00 &nbsp;|&nbsp; Modelo: us.anthropic.claude-haiku-4-5-20251001-v1:0</div>
 
 <!-- Tarjetas resumen -->
 <h2>Resumen General</h2>
 <div class="cards">
         <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;
                     box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:140px">
-          <div style="font-size:32px;font-weight:700;color:#52c41a">7.5</div>
+          <div style="font-size:32px;font-weight:700;color:#52c41a">9.0</div>
           <div style="font-size:13px;color:#666;margin-top:4px">Score General</div>
           <div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:75%;height:10px;border-radius:4px"></div>
+      <div style="background:#52c41a;width:90%;height:10px;border-radius:4px"></div>
     </div>
         </div>
         <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;
                     box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:140px">
-          <div style="font-size:32px;font-weight:700;color:#52c41a">7.9</div>
+          <div style="font-size:32px;font-weight:700;color:#52c41a">8.9</div>
           <div style="font-size:13px;color:#666;margin-top:4px">MESE Compuesto</div>
           <div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:79%;height:10px;border-radius:4px"></div>
+      <div style="background:#52c41a;width:89%;height:10px;border-radius:4px"></div>
     </div>
         </div>
         <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;
                     box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:140px">
-          <div style="font-size:32px;font-weight:700;color:#52c41a">8.8</div>
+          <div style="font-size:32px;font-weight:700;color:#52c41a">10.0</div>
           <div style="font-size:13px;color:#666;margin-top:4px">Secuencia</div>
           <div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:88%;height:10px;border-radius:4px"></div>
+      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
     </div>
         </div>
         <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;
                     box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:140px">
-          <div style="font-size:32px;font-weight:700;color:#fa8c16">6.8</div>
+          <div style="font-size:32px;font-weight:700;color:#52c41a">8.1</div>
           <div style="font-size:13px;color:#666;margin-top:4px">Estructura</div>
           <div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#fa8c16;width:68%;height:10px;border-radius:4px"></div>
+      <div style="background:#52c41a;width:81%;height:10px;border-radius:4px"></div>
     </div>
         </div></div>
 
 <div class="rates">
   <div class="rate-box">
     <div style="font-size:22px;font-weight:700;color:#52c41a">
-      83%</div>
+      100%</div>
     <div style="font-size:13px;color:#666">Pass Rate (Judge)</div>
   </div>
   <div class="rate-box">
     <div style="font-size:22px;font-weight:700;color:#52c41a">
-      83%</div>
+      100%</div>
     <div style="font-size:13px;color:#666">MESE Pass Rate</div>
   </div>
   <div class="rate-box">
     <div style="font-size:22px;font-weight:700;color:#52c41a">
-      92%</div>
+      100%</div>
     <div style="font-size:13px;color:#666">Secuencias Válidas</div>
   </div>
 </div>
@@ -95,6 +95,8 @@
 <!-- LLM Judge + Tabla Humana -->
 <h2>LLM Judge + Revisión Humana</h2>
 <p style="font-size:13px;color:#888;margin-bottom:12px">
+  Las 4 dimensiones MESE (Mapping, Exhaustiveness, Sequence, Experience) siguen el
+  principio MECE: mutuamente excluyentes y colectivamente exhaustivas.<br>
   Completa las columnas amarillas y exporta con el botón.
 </p>
 <div style="overflow-x:auto">
@@ -117,12 +119,12 @@
           <td style="max-width:200px">
             <strong>¿Qué es una llave candidata en bases de datos?</strong><br>
             <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">bases_de_datos</span><br>
-            <small style="color:#999">t=35.3s</small>
+            <small style="color:#999">t=35.6s</small>
           </td>
           <td>
             <details>
               <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Definir formalmente el conjunto de atributos candidatos</li><li>Verificar la propiedad de unicidad en cada atributo candidato</li><li>Validar la propiedad de minimalidad del conjunto candidato</li><li>Compilar el conjunto de todas las claves candidatas válidas</li><li>Diferenciar clave primaria de claves alternas</li><li>Implementar restricciones de clave candidata en el motor de base de datos</li><li>[inferido] Documentar la normalización del esquema respecto a claves candidatas</li><li>Validar integridad referencial usando claves candidatas en relaciones foráneas</li><li>Optimizar índices basados en claves candidatas para consultas frecuentes</li><li>Documentar dependencias funcionales derivadas de claves candidatas</li><li>Ejecutar pruebas de integridad de claves candidatas en datos históricos</li><li>Comunicar decisiones de claves candidatas a stakeholders técnicos y de negocio</li></ol>
+              <ol style="padding-left:16px;margin:4px 0"><li>Definir el conjunto de atributos candidatos para clave candidata</li><li>Verificar la propiedad de unicidad en cada columna candidata</li><li>Validar la propiedad de minimalidad en claves compuestas</li><li>Comparar claves candidatas con la clave primaria designada</li><li>Designar claves alternas (alternate keys) para claves candidatas no primarias</li><li>Validar integridad referencial usando claves candidatas</li><li>[inferido] Analizar estabilidad temporal de claves candidatas</li><li>Evaluar rendimiento de índices en claves candidatas</li><li>Documentar claves candidatas en diccionario de datos</li><li>Validar normalización del esquema respecto a claves candidatas</li><li>Implementar restricciones de clave candidata en DDL</li><li>Auditar y monitorear violaciones de claves candidatas</li></ol>
             </details>
             <details style="margin-top:4px">
               <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
@@ -156,17 +158,17 @@
             <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
           </td>
           <td>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 9.1/10<br>
-            <small style="color:#666">11/12 checks</small>
+            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 8.1/10<br>
+            <small style="color:#666">10/12 checks</small>
             <details style="margin-top:4px">
               <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Compilar el conjunto de todas las claves candidatas válidas', 'Diferenciar clave primaria de claves alternas', '[inferido] Documentar la normalización del esquema respecto ']</li></ul>
+              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Fuera de rango: ["'Auditar y monitorear violaciones de claves candidatas': 2 key_points"]</li><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Comparar claves candidatas con la clave primaria designada', '[inferido] Analizar estabilidad temporal de claves candidata', 'Auditar y monitorear violaciones de claves candidatas']</li></ul>
             </details>
           </td>
           <td>
-            <strong style="color:#52c41a">8.6/10</strong>
+            <strong style="color:#52c41a">9.0/10</strong>
             <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">El roadmap es técnicamente sólido y responde la pregunta con profundidad. Proporciona una ruta clara desde definición co...</small>
+            <small style="color:#666">El contexto RAG proporciona una respuesta altamente relevante, técnicamente precisa y bien estructurada sobre llaves can...</small>
           </td>
           <td style="background:#fffbe6">
             <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
@@ -185,853 +187,6 @@
             </select>
             <label style="font-size:12px;display:block">Comentarios:</label>
             <textarea id="hc-1" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-2">
-          <td style="text-align:center;font-weight:bold">2</td>
-          <td style="max-width:200px">
-            <strong>¿Cómo se identifican las llaves candidatas en una tabla?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">bases_de_datos</span><br>
-            <small style="color:#999">t=27.2s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Analizar la estructura de la tabla y documentar atributos</li><li>Verificar la propiedad de no nulidad en columnas candidatas</li><li>Verificar la propiedad de unicidad en cada columna candidata</li><li>Identificar dependencias funcionales entre atributos</li><li>Validar unicidad de claves compuestas candidatas</li><li>Documentar todas las claves candidatas identificadas</li><li>[inferido] Evaluar estabilidad y minimalidad de claves candidatas</li><li>Seleccionar la clave primaria entre las candidatas</li><li>Crear índices para claves candidatas alternativas</li><li>Validar integridad referencial con claves candidatas</li><li>Documentar el modelo de claves en el esquema de base de datos</li><li>Ejecutar pruebas de integridad y verificar restricciones</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Listar atributos de la tabla</li><li>Verificar unicidad por atributo</li><li>Verificar minimalidad</li><li>Documentar llaves candidatas encontradas</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
-    </div> 10.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">8.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">10.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">9.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">9.2</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 9.1/10<br>
-            <small style="color:#666">11/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['[inferido] Evaluar estabilidad y minimalidad de claves candi']</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">8.8/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">Roadmap de alta calidad que responde exhaustivamente la pregunta con secuencia lógica y precisión técnica. Los pasos son...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-2" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-2" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-2" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-2" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-3">
-          <td style="text-align:center;font-weight:bold">3</td>
-          <td style="max-width:200px">
-            <strong>¿Cuál es la diferencia entre llave primaria y llave candidata?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">bases_de_datos</span><br>
-            <small style="color:#999">t=54.0s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Identificar todas las claves candidatas en la tabla</li><li>Verificar la propiedad de unicidad en cada columna candidata</li><li>Analizar la nulabilidad de cada clave candidata</li><li>Seleccionar la clave primaria entre las claves candidatas</li><li>Implementar restricciones UNIQUE para claves candidatas alternas</li><li>Implementar la restricción PRIMARY KEY</li><li>Definir relaciones de integridad referencial usando la clave primaria</li><li>Documentar diferencias funcionales entre clave primaria y claves candidatas</li><li>[inferido] Optimizar índices para claves candidatas en consultas frecuentes</li><li>[inferido] Validar integridad de claves candidatas en datos históricos</li><li>[inferido] Implementar auditoría de cambios en clave primaria</li><li>Crear documentación de decisiones de diseño para futuras migraciones</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Definir llave candidata</li><li>Definir llave primaria</li><li>Comparar características</li><li>Identificar llaves alternativas</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
-    </div> 10.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">10.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">9.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">9.3</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">FAIL</span> 3.5/10<br>
-            <small style="color:#666">4/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Nodos 'inicio': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Nodos 'fin': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Primer paso tipo 'proceso' (debe ser 'inicio')</li><li style="color:#f5222d;font-size:11px">Último paso tipo '' (debe ser 'fin')</li><li style="color:#f5222d;font-size:11px">Tipos inválidos: ["'Crear documentación de decisiones de diseño para futuras migraciones' tipo='None'"]</li><li style="color:#f5222d;font-size:11px">Fuera de rango: ["'Crear documentación de decisiones de diseño para futuras migraciones': 0 key_points"]</li><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['[inferido] Optimizar índices para claves candidatas en consu', '[inferido] Validar integridad de claves candidatas en datos ', '[inferido] Implementar auditoría de cambios en clave primari']</li><li style="color:#f5222d;font-size:11px">Vacíos: ["paso 'step_12' campo 'type'"]</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">8.8/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">El roadmap es altamente relevante, técnicamente preciso y coherente. Responde la pregunta fundamental diferenciando cand...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-3" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-3" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-3" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-3" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-4">
-          <td style="text-align:center;font-weight:bold">4</td>
-          <td style="max-width:200px">
-            <strong>¿Cuál es la complejidad en tiempo de las operaciones en Power Query?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">power_query</span><br>
-            <small style="color:#999">t=38.9s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Clasificar operaciones por complejidad asintótica Big-O</li><li>Analizar el impacto del motor lazy evaluation en la complejidad temporal</li><li>Evaluar complejidad de operaciones de filtrado con condiciones complejas</li><li>Analizar complejidad de operaciones de agrupación y agregación</li><li>Evaluar complejidad de operaciones de combinación de tablas (Join)</li><li>Analizar complejidad de operaciones de ordenación</li><li>Evaluar complejidad de transformaciones de datos y funciones personalizadas</li><li>Documentar optimizaciones de query folding por tipo de operación</li><li>Crear matriz de complejidad temporal para combinaciones de operaciones</li><li>Establecer benchmarks de rendimiento por rango de tamaño de datos</li><li>Desarrollar guía de optimización basada en complejidad temporal</li><li>Validar y documentar hallazgos en matriz de referencia final</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Entender el modelo de evaluación lazy</li><li>Analizar complejidad de filtrado</li><li>Analizar complejidad de merge/join</li><li>Analizar complejidad de agrupación</li><li>Aplicar optimizaciones</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
-    </div> 10.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">8.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">10.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">9.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">9.1</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 7.5/10<br>
-            <small style="color:#666">9/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Nodos 'inicio': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Primer paso tipo 'proceso' (debe ser 'inicio')</li><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Clasificar operaciones por complejidad asintótica Big-O', 'Desarrollar guía de optimización basada en complejidad tempo']</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">8.6/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">El roadmap es altamente relevante y coherente, con buena cobertura técnica. Responde directamente la pregunta sobre comp...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-4" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-4" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-4" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-4" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-5">
-          <td style="text-align:center;font-weight:bold">5</td>
-          <td style="max-width:200px">
-            <strong>¿Cómo optimizar una consulta lenta en Power Query?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">power_query</span><br>
-            <small style="color:#999">t=38.7s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Diagnosticar operaciones que rompen query folding</li><li>Aplicar filtros nativos antes de transformaciones complejas</li><li>Reemplazar funciones personalizadas por operaciones nativas</li><li>Optimizar operaciones de Merge/Join con índices en fuente</li><li>Reducir transformaciones de Pivot/Unpivot a operaciones únicas</li><li>Eliminar expansión de tablas anidadas innecesarias</li><li>[inferido] Implementar caché de consultas intermedias</li><li>Configurar paralelización de cargas ETL con múltiples consultas</li><li>Aplicar compresión y reducción de tipos de datos</li><li>Usar DirectQuery para datasets muy grandes (> 1GB)</li><li>Implementar particionamiento de consultas por rango de datos</li><li>Validar mejoras con métricas de rendimiento y benchmarking</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Diagnosticar consulta con el Performance Analyzer</li><li>Aplicar filtros al inicio del pipeline</li><li>Eliminar columnas innecesarias</li><li>Revisar y corregir tipos de datos</li><li>Deshabilitar cargas de tablas intermedias</li><li>Medir y comparar mejora</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
-    </div> 10.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">8.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">8.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">10.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">8.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">8.7</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 7.5/10<br>
-            <small style="color:#666">9/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Nodos 'inicio': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Primer paso tipo 'proceso' (debe ser 'inicio')</li><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Diagnosticar operaciones que rompen query folding', 'Reemplazar funciones personalizadas por operaciones nativas', 'Reducir transformaciones de Pivot/Unpivot a operaciones únic']</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">8.2/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">El roadmap es altamente relevante, técnicamente preciso y bien estructurado. Cubre diagnóstico, optimizaciones fundament...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-5" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-5" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-5" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-5" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-6">
-          <td style="text-align:center;font-weight:bold">6</td>
-          <td style="max-width:200px">
-            <strong>¿Cómo crear un flujo con agentes IA en N8N?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">n8n_ia</span><br>
-            <small style="color:#999">t=36.9s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Configurar credenciales y conexión del modelo LLM en N8N</li><li>Diseñar la estructura del agente IA con definición clara de herramientas (Tools)</li><li>Crear nodo Agent en N8N con configuración de modelo y parámetros de razonamiento</li><li>Implementar Model Context Protocol (MCP) para comunicación estructurada entre agente y herramientas</li><li>Configurar gestión de estado y contexto conversacional del agente</li><li>Encadenar tareas mediante nodos de decisión y condicionales basados en salida del agente</li><li>Integrar APIs externas (Notion, Google Calendar, etc.) como Tools del agente</li><li>[inferido] Implementar logging y auditoría de decisiones del agente para trazabilidad</li><li>Validar y testear flujo del agente con casos de prueba determinísticos</li><li>Implementar mecanismo de fallback y recuperación ante errores del agente</li><li>Optimizar prompts del agente mediante iteración y análisis de comportamiento</li><li>Desplegar flujo del agente en producción con monitoreo continuo y gobernanza</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Crear nuevo workflow en N8N</li><li>Agregar nodo Trigger</li><li>Agregar nodo AI Agent</li><li>Configurar credenciales del LLM</li><li>Definir herramientas del agente</li><li>Configurar memoria conversacional</li><li>Activar y probar el flujo</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
-    </div> 10.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">8.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">10.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">8.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">8.9</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">FAIL</span> 3.5/10<br>
-            <small style="color:#666">4/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Nodos 'inicio': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Nodos 'fin': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Primer paso tipo 'proceso' (debe ser 'inicio')</li><li style="color:#f5222d;font-size:11px">Último paso tipo '' (debe ser 'fin')</li><li style="color:#f5222d;font-size:11px">Tipos inválidos: ["'Desplegar flujo del agente en producción con monitoreo continuo y gobernanza' tipo='None'"]</li><li style="color:#f5222d;font-size:11px">Fuera de rango: ["'Desplegar flujo del agente en producción con monitoreo continuo y gobernanza': 0 key_points"]</li><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Encadenar tareas mediante nodos de decisión y condicionales ', '[inferido] Implementar logging y auditoría de decisiones del']</li><li style="color:#f5222d;font-size:11px">Vacíos: ["paso 'step_12' campo 'type'"]</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">8.6/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">El roadmap es altamente relevante, completo y coherente. Proporciona una guía técnica sólida para implementar agentes IA...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-6" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-6" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-6" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-6" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-7">
-          <td style="text-align:center;font-weight:bold">7</td>
-          <td style="max-width:200px">
-            <strong>¿Cómo testear un flujo de agente IA en N8N?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">n8n_ia</span><br>
-            <small style="color:#999">t=40.9s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Diseñar la arquitectura del flujo con separación de responsabilidades</li><li>Configurar fixtures y datos de prueba para reproducibilidad</li><li>Implementar validación de outputs del agente antes de ejecución</li><li>Mockear dependencias externas (APIs, bases de datos) para tests unitarios</li><li>Ejecutar tests unitarios validando cada nodo independientemente</li><li>Validar manejo de errores y casos de excepción</li><li>Ejecutar tests de integración validando flujos entre nodos</li><li>Implementar tests end-to-end con datos reales en ambiente de staging</li><li>Debuggear flujos complejos usando logging estructurado y breakpoints</li><li>Validar gobernanza y auditabilidad de decisiones del agente</li><li>Automatizar ejecución de tests con CI/CD pipeline</li><li>Documentar casos de prueba y crear matriz de cobertura</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Activar modo de ejecución manual</li><li>Ejecutar el workflow con datos de prueba</li><li>Revisar output de cada nodo</li><li>Revisar logs de ejecución</li><li>Probar casos borde</li><li>Documentar resultados</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
-    </div> 10.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">10.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">8.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">9.2</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 9.1/10<br>
-            <small style="color:#666">11/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Mockear dependencias externas (APIs, bases de datos) para te', 'Automatizar ejecución de tests con CI/CD pipeline']</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">8.6/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">El roadmap es altamente relevante, completo y coherente. Traduce correctamente los principios del contexto RAG en pasos ...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-7" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-7" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-7" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-7" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-8">
-          <td style="text-align:center;font-weight:bold">8</td>
-          <td style="max-width:200px">
-            <strong>¿Qué propiedades debe cumplir una llave candidata?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">bases_de_datos</span><br>
-            <small style="color:#999">t=33.9s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Identificar columnas candidatas para formar la clave</li><li>Verificar la propiedad de unicidad en cada columna candidata</li><li>Validar la propiedad de minimalidad del conjunto de columnas</li><li>Verificar la ausencia de valores nulos en la llave candidata</li><li>[inferido] Evaluar la estabilidad temporal de los valores de la llave candidata</li><li>Verificar la compatibilidad con integridad referencial</li><li>Evaluar el rendimiento de índices sobre la llave candidata</li><li>Documentar la llave candidata en el modelo de datos</li><li>Seleccionar la clave primaria entre las claves candidatas validadas</li><li>Implementar restricciones de clave primaria en la base de datos</li><li>Validar integridad referencial con claves foráneas</li><li>Ejecutar pruebas de regresión y certificar la llave candidata</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Definir la propiedad de unicidad</li><li>Definir la propiedad de minimalidad</li><li>Verificar unicidad en los atributos</li><li>Verificar minimalidad del conjunto</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:90%;height:10px;border-radius:4px"></div>
-    </div> 9.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">9.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">9.0</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 9.1/10<br>
-            <small style="color:#666">11/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['[inferido] Evaluar la estabilidad temporal de los valores de']</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">8.8/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">El roadmap es altamente relevante y técnicamente preciso, respondiendo directamente a las propiedades de llaves candidat...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-8" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-8" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-8" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-8" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-9">
-          <td style="text-align:center;font-weight:bold">9</td>
-          <td style="max-width:200px">
-            <strong>¿Puede una tabla tener más de una llave candidata?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">bases_de_datos</span><br>
-            <small style="color:#999">t=34.6s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Identificar atributos con potencial de unicidad en la tabla</li><li>Verificar la propiedad de unicidad con restricción UNIQUE en cada columna candidata</li><li>Documentar todas las claves candidatas identificadas</li><li>Seleccionar la clave primaria entre las claves candidatas</li><li>Implementar claves únicas (UNIQUE KEY) para las candidatas no seleccionadas</li><li>Validar restricciones de integridad referencial con claves foráneas</li><li>[inferido] Aplicar normalización de esquema considerando claves candidatas</li><li>Crear índices en claves candidatas para optimizar búsquedas</li><li>Documentar diferencias entre PRIMARY KEY, UNIQUE KEY y CANDIDATE KEY</li><li>Ejecutar pruebas de integridad para validar restricciones</li><li>Revisar y optimizar estrategia de claves en contexto de escalabilidad</li><li>Documentar decisiones de diseño en especificación técnica del esquema</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Identificar todos los conjuntos únicos y mínimos</li><li>Listar las llaves candidatas</li><li>Elegir la llave primaria</li><li>Marcar las demás como alternativas</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
-    </div> 10.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">9.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">10.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">9.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">9.3</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 7.5/10<br>
-            <small style="color:#666">9/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Nodos 'inicio': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Primer paso tipo 'proceso' (debe ser 'inicio')</li><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['[inferido] Aplicar normalización de esquema considerando cla']</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">8.8/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">El roadmap es altamente relevante, técnicamente preciso y coherente. Cubre completamente el ciclo de vida de llaves cand...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-9" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-9" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-9" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-9" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-10">
-          <td style="text-align:center;font-weight:bold">10</td>
-          <td style="max-width:200px">
-            <strong>¿Qué es la evaluación lazy en Power Query?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">power_query</span><br>
-            <small style="color:#999">t=34.9s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (12)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Comprender el modelo de evaluación lazy vs eager en Power Query</li><li>Identificar el punto de materialización de datos en el flujo ETL</li><li>Analizar el árbol de operaciones generado por Power Query</li><li>Aplicar column pruning para eliminar columnas no utilizadas antes de materialización</li><li>Implementar predicate pushdown para filtrar datos en la fuente</li><li>Medir impacto de lazy evaluation en memoria y tiempo de ejecución</li><li>[inferido] Evitar operaciones que fuerzan evaluación eager innecesaria</li><li>Optimizar joins y transformaciones para mantener lazy evaluation</li><li>Configurar folding en Power Query para maximizar pushdown a la fuente</li><li>Diseñar estrategia de caching para consultas intermedias en ETL</li><li>Documentar y monitorear cambios en evaluación lazy tras actualizaciones de Power Query</li><li>Validar y documentar el impacto de lazy evaluation en el SLA de ETL</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Entender qué es la evaluación lazy</li><li>Identificar cuándo se materializa el resultado</li><li>Aprovechar el query folding</li><li>Validar el plan de ejecución</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:100%;height:10px;border-radius:4px"></div>
-    </div> 10.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#52c41a">8.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#52c41a">7.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">10.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#52c41a">7.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#52c41a">8.3</td>
-              </tr>
-            </table>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span>
-          </td>
-          <td>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span> 9.1/10<br>
-            <small style="color:#666">11/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Comprender el modelo de evaluación lazy vs eager en Power Qu', 'Medir impacto de lazy evaluation en memoria y tiempo de ejec', '[inferido] Evitar operaciones que fuerzan evaluación eager i']</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#52c41a">7.6/10</strong>
-            <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">PASS</span><br>
-            <small style="color:#666">Roadmap técnicamente sólido y bien ordenado que responde la pregunta sobre evaluación lazy. La coherencia y precisión té...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-10" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-10" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-10" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-10" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-11">
-          <td style="text-align:center;font-weight:bold">11</td>
-          <td style="max-width:200px">
-            <strong>¿Cómo se conecta un LLM a un agente en N8N?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">n8n_ia</span><br>
-            <small style="color:#999">t=73022.9s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (1)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Error de Sistema</li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Agregar el nodo Chat Model</li><li>Configurar las credenciales de la API</li><li>Seleccionar el modelo a usar</li><li>Conectar el modelo al nodo AI Agent</li><li>Probar la conexión</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Inválida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#f5222d;width:0%;height:10px;border-radius:4px"></div>
-    </div> 0.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style="color:#f5222d">Error de Sistema</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> El paso actual no es un paso ejecutable sino un error. Orden correcto debería ser: (1) Agregar nodo Chat Model, (2) Configurar credenciales API, (3) Conectar salida del modelo a entrada Chat Model del nodo AI Agent.
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#f5222d">0.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#f5222d">0.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#f5222d">0.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#f5222d">0.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#f5222d">0.0</td>
-              </tr>
-            </table>
-            <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">FAIL</span>
-          </td>
-          <td>
-            <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">FAIL</span> 3.8/10<br>
-            <small style="color:#666">5/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">1 pasos (requiere 6-12)</li><li style="color:#f5222d;font-size:11px">Nodos 'inicio': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Nodos 'fin': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Primer paso tipo 'decision' (debe ser 'inicio')</li><li style="color:#f5222d;font-size:11px">Último paso tipo 'decision' (debe ser 'fin')</li><li style="color:#f5222d;font-size:11px">Fuera de rango: ["'Error de Sistema': 0 key_points"]</li><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Error de Sistema']</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#f5222d">0.6/10</strong>
-            <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">FAIL</span><br>
-            <small style="color:#666">El roadmap es completamente inútil: contiene solo un error de sistema sin relación con la pregunta. Carece de todos los ...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-11" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-11" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-11" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-11" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
-          </td>
-        </tr>
-        <tr id="row-12">
-          <td style="text-align:center;font-weight:bold">12</td>
-          <td style="max-width:200px">
-            <strong>¿Cómo se agrega memoria conversacional a un agente en N8N?</strong><br>
-            <span style="background:#722ed1;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">n8n_ia</span><br>
-            <small style="color:#999">t=42.0s</small>
-          </td>
-          <td>
-            <details>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados (11)</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Diseñar arquitectura de almacenamiento de contexto conversacional</li><li>Configurar nodo de almacenamiento de historial en N8N</li><li>Implementar nodo de recuperación de contexto conversacional previo</li><li>Inyectar historial conversacional en el prompt del agente</li><li>Configurar gestión de sesiones y ciclo de vida de conversaciones</li><li>Integrar base de datos vectorial para búsqueda semántica de contexto</li><li>Implementar mecanismo de limpieza y rotación de memoria</li><li>Configurar reglas de control de contexto y límites de memoria</li><li>Definir Tools y MCP para acciones del agente con contexto</li><li>Implementar logging y auditoría de decisiones del agente</li><li></li></ol>
-            </details>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0"><li>Agregar el nodo de memoria</li><li>Configurar el tamaño de la ventana</li><li>Conectar la memoria al nodo AI Agent</li><li>Probar que el agente recuerda el contexto</li></ol>
-            </details>
-          </td>
-          <td>
-            <strong>Secuencia</strong> <span style="background:#52c41a;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">Válida</span><br>
-            <small><div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
-      <div style="background:#52c41a;width:70%;height:10px;border-radius:4px"></div>
-    </div> 7.0/10</small><br>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
-              <ul style="font-size:12px;padding-left:16px;margin:4px 0"><li style='color:#52c41a'>Ninguno</li></ul>
-              <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> Orden correcto
-              </div>
-            </details>
-          </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:#f5222d">4.0</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:#f5222d">3.0</td></tr>
-              <tr><td>Secuencia</td><td style="color:#52c41a">7.0</td></tr>
-              <tr><td>Experiencia</td><td style="color:#f5222d">2.0</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
-                <td style="color:#f5222d">4.5</td>
-              </tr>
-            </table>
-            <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">FAIL</span>
-          </td>
-          <td>
-            <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">FAIL</span> 2.5/10<br>
-            <small style="color:#666">3/12 checks</small>
-            <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
-              <ul style="padding-left:14px;margin:4px 0"><li style="color:#f5222d;font-size:11px">Nodos 'inicio': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Nodos 'fin': 0 (debe ser 1)</li><li style="color:#f5222d;font-size:11px">Primer paso tipo 'proceso' (debe ser 'inicio')</li><li style="color:#f5222d;font-size:11px">Último paso tipo '' (debe ser 'fin')</li><li style="color:#f5222d;font-size:11px">Tipos inválidos: ["'?' tipo='None'"]</li><li style="color:#f5222d;font-size:11px">Fuera de rango: ["'?': 0 key_points"]</li><li style="color:#f5222d;font-size:11px">Sin verbo de acción: ['Inyectar historial conversacional en el prompt del agente', '']</li><li style="color:#f5222d;font-size:11px">Descripciones cortas: ["'?' (0 oraciones, 0 chars)"]</li><li style="color:#f5222d;font-size:11px">Vacíos: ["paso 'step_11' campo 'label'", "paso 'step_11' campo 'description'", "paso 'step_11' campo 'type'"]</li></ul>
-            </details>
-          </td>
-          <td>
-            <strong style="color:#f5222d">4.0/10</strong>
-            <span style="background:#f5222d;color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">FAIL</span><br>
-            <small style="color:#666">El roadmap es arquitectónicamente sofisticado pero desalineado con la pregunta y el contexto. Propone una solución enter...</small>
-          </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-12" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-12" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-12" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-12" rows="2"
                       style="width:100%;font-size:12px;resize:vertical"
                       placeholder="Observaciones..."></textarea>
           </td>

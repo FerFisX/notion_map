@@ -39,7 +39,8 @@ class EvalConfig:
         "technical_accuracy",
     ])
 
-    # MESE: Mapping, Exhaustiveness, Sequence (mayor peso), Experience
+    # Dimensiones MESE bajo el principio MECE (Minto): Mapping, Exhaustiveness,
+    # Sequence (mayor peso por ser lo más crítico en un roadmap), Experience.
     mese_weights: dict = field(default_factory=lambda: {
         "mapping":        0.25,
         "exhaustiveness": 0.20,

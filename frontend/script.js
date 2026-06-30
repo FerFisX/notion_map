@@ -3,9 +3,12 @@ var cy = cytoscape({
     container: document.getElementById('cy'),
     style: [
         { selector: 'node[type="main"]', style: { 'label': 'data(label)', 'shape': 'round-rectangle', 'width': '220px', 'height': '60px', 'background-color': 'white', 'border-width': 2, 'border-color': '#333', 'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'wrap', 'text-max-width': '180px', 'font-size': '12px', 'font-weight': 'bold' } },
+        // Color según la fuente predominante del nodo
+        { selector: 'node[type="main"][source="corpus"]', style: { 'background-color': '#e6f7ff', 'border-color': '#1890ff' } },
+        { selector: 'node[type="main"][source="web"]',    style: { 'background-color': '#fff7e6', 'border-color': '#fa8c16' } },
         { selector: 'node[type="sub"]', style: { 'label': 'data(label)', 'shape': 'tag', 'width': '140px', 'height': '40px', 'background-color': '#fffbe6', 'border-color': '#ffe58f', 'border-width': 1, 'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'wrap', 'text-max-width': '120px', 'font-size': '10px', 'color': '#555' } },
         { selector: 'edge', style: { 'width': 2, 'line-color': '#ccc', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
-        { selector: ':selected', style: { 'border-color': '#1890ff', 'border-width': 3, 'background-color': '#e6f7ff' } }
+        { selector: ':selected', style: { 'border-width': 4, 'border-color': '#1890ff' } }
     ]
 });
 
@@ -262,9 +265,10 @@ function updateBreadcrumbs(pathArray) {
 
 function renderGraph(data) {
     cy.elements().remove();
+    updateSourceMetrics(data.sources);
     let elements = [];
     data.steps.forEach((step, i) => {
-        elements.push({ data: { id: step.id, label: step.label, description: step.description, type: 'main' } });
+        elements.push({ data: { id: step.id, label: step.label, description: step.description, type: 'main', source: step.source || 'corpus' } });
         (step.key_points || []).forEach((p, j) => {
             const subId = `${step.id}_sub_${j}`;
             elements.push({ data: { id: subId, label: p, type: 'sub' } });
@@ -275,6 +279,29 @@ function renderGraph(data) {
     cy.add(elements);
     cy.resize();
     cy.layout({ name: 'dagre', rankDir: 'LR', align: 'UL', rankSep: 80, nodeSep: 20, fit: true, padding: 30, animate: true }).run();
+}
+
+function updateSourceMetrics(sources) {
+    const panel = document.getElementById('sourceMetrics');
+    if (!sources) { panel.classList.add('hidden'); return; }
+
+    const corpus = sources.corpus_pct ?? 0;
+    const web    = sources.web_pct ?? 0;
+    panel.classList.remove('hidden');
+
+    document.getElementById('smCorpus').innerText = corpus + '%';
+    document.getElementById('smWeb').innerText    = web + '%';
+    document.getElementById('smBarCorpus').style.width = corpus + '%';
+    document.getElementById('smBarWeb').style.width    = web + '%';
+
+    const modeLabels = {
+        corpus: 'Solo base de conocimiento',
+        hybrid: 'Híbrido (corpus + web)',
+        web:    'Mayormente web',
+        error:  'Error'
+    };
+    const mode = sources.mode || 'corpus';
+    document.getElementById('smMode').innerText = modeLabels[mode] || mode;
 }
 
 function updateContextBanner(title, desc) {

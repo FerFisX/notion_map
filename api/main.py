@@ -232,7 +232,7 @@ async def eval_pipeline(req: PipelineRequest):
         steps.append({
             "key":   "judge",
             "title": "6. LLM como Juez (MESE)",
-            "what":  "Un LLM evalua el roadmap en 4 dimensiones MESE (Mapping, Exhaustividad, Secuencia, Experiencia) + criterios clasicos.",
+            "what":  "Un LLM evalua el roadmap en 4 dimensiones MESE (Mapping, Exhaustividad, Secuencia, Experiencia), disenadas bajo el principio MECE, + criterios clasicos.",
             "why":   "Evalua la CALIDAD del contenido (no solo la forma): precision, cobertura, orden logico y claridad.",
             "result": raw,
             "elapsed_s": round(time.time() - t0, 2),

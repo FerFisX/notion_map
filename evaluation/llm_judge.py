@@ -3,6 +3,17 @@ LLM-as-a-Judge para los roadmaps. Evalúa cada roadmap con criterios clásicos
 (relevancia, completitud, coherencia, precisión, fidelidad), las cuatro
 dimensiones MESE (Mapping, Exhaustiveness, Sequence, Experience), un análisis
 de secuencia dedicado, validación de estructura y similitud query-respuesta.
+
+Fundamento — principio MECE (Minto, 1987):
+  Las cuatro dimensiones se diseñaron bajo el principio MECE
+  (Mutually Exclusive, Collectively Exhaustive):
+    - Mutuamente excluyentes: cada dimensión mide algo que SOLO ella mide
+      (no se solapan). Se fuerza en el prompt del juez.
+    - Colectivamente exhaustivas: juntas cubren toda la calidad del roadmap
+      (correcto + completo + ordenado + claro), sin dejar nada fuera.
+  El acrónimo MESE corresponde a las iniciales de las cuatro dimensiones
+  (Mapping-Exhaustiveness-Sequence-Experience); el principio que las sustenta
+  es MECE.
 """
 from __future__ import annotations
 
@@ -50,8 +61,9 @@ class SequenceEval(BaseModel):
 
 class MESEScores(BaseModel):
     """
-    MESE — Mutually Exclusive, Simultaneously Exhaustive.
-    Cada dimensión mide algo que SOLO ella mide.
+    Cuatro dimensiones MESE diseñadas bajo el principio MECE de Minto:
+    Mutually Exclusive (cada una mide algo que SOLO ella mide) y
+    Collectively Exhaustive (juntas cubren toda la calidad del roadmap).
     """
     mapping:               int = Field(ge=0, le=10,
         description="M — ¿Es factualmente preciso cada paso vs el contexto? NO evalúes cobertura ni orden ni claridad")
@@ -119,7 +131,7 @@ SECCIÓN 2 — ANÁLISIS DE SECUENCIA (detallado):
   - Lista los pasos fuera de orden por su label EXACTO
   - Si el orden está bien, pon out_of_order_steps: [] y suggested_fix: "Orden correcto"
 
-SECCIÓN 3 — MESE (CRÍTICO — cada dimensión es MUTUAMENTE EXCLUSIVA):
+SECCIÓN 3 — MESE bajo principio MECE (CRÍTICO — cada dimensión es MUTUAMENTE EXCLUSIVA y, en conjunto, COLECTIVAMENTE EXHAUSTIVA):
   MAPPING (M):
     Evalúa SOLO si el CONTENIDO de cada paso es factualmente correcto.
     Pregúntate: ¿dice algo falso o incorrecto según el contexto?
@@ -294,7 +306,7 @@ class LLMJudgeEvaluator:
 
         # MESE
         print(f"\n  {SEP}")
-        print(f"  MESE  (Mutually Exclusive, Simultaneously Exhaustive)")
+        print(f"  MESE  (principio MECE: Mutually Exclusive, Collectively Exhaustive)")
         print(f"  {SEP}")
         mese_labels = [
             ("mapping",        "M - Mapping        ", "Precision factual de cada paso vs contexto"),

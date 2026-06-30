@@ -25,6 +25,12 @@ TOP_N         = int(os.getenv("RETRIEVAL_TOP_N", "5"))
 # Apagado por defecto para que la evaluación siga siendo reproducible.
 WEB_FALLBACK     = os.getenv("WEB_FALLBACK", "false").lower().strip() in ("true", "1", "yes")
 WEB_FALLBACK_MIN = float(os.getenv("WEB_FALLBACK_THRESHOLD", "0.25"))
+# Banda híbrida: si el mejor score del corpus cae entre el umbral de fallback y
+# el híbrido, el corpus cubre parcialmente y se complementa con búsqueda web.
+#   score >= WEB_HYBRID_MIN                  -> solo corpus
+#   WEB_FALLBACK_MIN <= score < WEB_HYBRID_MIN -> híbrido (corpus + web)
+#   score < WEB_FALLBACK_MIN                 -> mayormente web
+WEB_HYBRID_MIN = float(os.getenv("WEB_HYBRID_THRESHOLD", "0.45"))
 
 
 class RoadmapStep(BaseModel):
@@ -172,34 +178,107 @@ class RagEngine:
         result = self.retrieve_contexts_scored(query)
         return [c["text"] for c in result["selected"]]
 
-    def corpus_covers(self, retrieval: dict) -> bool:
-        """True si el corpus local cubre la consulta (hay algún fragmento con score suficiente)."""
-        scores = [c.get("vector_score") for c in retrieval.get("pool", []) if c.get("vector_score") is not None]
-        return bool(scores) and max(scores) >= WEB_FALLBACK_MIN
-
-    def get_contexts(self, refined_query: str) -> list:
+    def get_contexts_with_sources(self, refined_query: str) -> dict:
         """
-        Recupera contexto del corpus local. Si está activado el fallback web y el
-        corpus no cubre la consulta, complementa con búsqueda en internet (efímera).
+        Recupera contexto y decide la fuente según el mejor score del corpus:
+          - score >= WEB_HYBRID_MIN              -> solo corpus
+          - WEB_FALLBACK_MIN <= score < HYBRID   -> híbrido (corpus + web)
+          - score < WEB_FALLBACK_MIN             -> mayormente web
+        Devuelve los contextos separados por origen para poder atribuir cada nodo.
         """
         retrieval = self.retrieve_contexts_scored(refined_query)
-        contexts  = [c["text"] for c in retrieval["selected"]]
+        corpus_contexts = [c["text"] for c in retrieval["selected"]]
+        scores = [c.get("vector_score") for c in retrieval.get("pool", []) if c.get("vector_score") is not None]
+        best   = max(scores) if scores else 0.0
 
-        if WEB_FALLBACK and not self.corpus_covers(retrieval):
-            best = max((c.get("vector_score") or 0) for c in retrieval["pool"]) if retrieval["pool"] else 0
-            print(f"  [Web Fallback] Corpus insuficiente (mejor score={best:.3f} < {WEB_FALLBACK_MIN}). Buscando en internet...")
+        web_contexts = []
+        if best >= WEB_HYBRID_MIN:
+            mode = "corpus"
+        elif WEB_FALLBACK:
+            mode = "hybrid" if best >= WEB_FALLBACK_MIN else "web"
+            print(f"  [Web Fallback/{mode}] mejor score del corpus={best:.3f}. Complementando con internet...")
             from src.web_search import search_web
             web_contexts = search_web(refined_query, max_results=4)
-            if web_contexts:
-                contexts = web_contexts + contexts  # prioriza lo recién encontrado
-        return contexts
+            if not web_contexts:
+                mode = "corpus"  # la búsqueda falló: seguimos solo con corpus
+        else:
+            mode = "corpus"  # fallback desactivado
+
+        return {
+            "contexts":        web_contexts + corpus_contexts,  # web primero
+            "corpus_contexts": corpus_contexts,
+            "web_contexts":    web_contexts,
+            "best_score":      round(best, 3),
+            "mode":            mode,
+        }
+
+    def _cosine(self, a, b) -> float:
+        import numpy as np
+        a, b = np.array(a), np.array(b)
+        denom = (np.linalg.norm(a) * np.linalg.norm(b))
+        return float(a.dot(b) / denom) if denom else 0.0
+
+    def attribute_step_sources(self, roadmap: dict, corpus_contexts: list, web_contexts: list) -> dict:
+        """
+        Marca cada paso con su fuente predominante ('corpus' o 'web') comparando
+        la similitud semántica del paso contra cada conjunto de contextos.
+        Devuelve los porcentajes globales.
+        """
+        steps = roadmap.get("steps", [])
+        if not steps:
+            return {"corpus_pct": 0, "web_pct": 0}
+
+        # Casos triviales: una sola fuente
+        if not web_contexts:
+            for s in steps:
+                s["source"] = "corpus"
+            return {"corpus_pct": 100, "web_pct": 0}
+        if not corpus_contexts:
+            for s in steps:
+                s["source"] = "web"
+            return {"corpus_pct": 0, "web_pct": 100}
+
+        corpus_emb = self.embeddings.embed_documents(corpus_contexts)
+        web_emb    = self.embeddings.embed_documents(web_contexts)
+
+        corpus_n = web_n = 0
+        for s in steps:
+            text = f"{s.get('label','')}. {s.get('description','')}"
+            e = self.embeddings.embed_query(text)
+            best_corpus = max(self._cosine(e, c) for c in corpus_emb)
+            best_web    = max(self._cosine(e, w) for w in web_emb)
+            src = "web" if best_web > best_corpus else "corpus"
+            s["source"] = src
+            if src == "corpus":
+                corpus_n += 1
+            else:
+                web_n += 1
+
+        total = len(steps)
+        return {
+            "corpus_pct": round(corpus_n / total * 100),
+            "web_pct":    round(web_n / total * 100),
+        }
 
     def generate_roadmap(self, query: str):
         try:
             refined_query = self.rewrite_query(query)
             print(f"  [Retrieval] Buscando con consulta refinada...")
-            contexts = self.get_contexts(refined_query)
-            return self.build_roadmap(query, refined_query, contexts)
+            src     = self.get_contexts_with_sources(refined_query)
+            roadmap = self.build_roadmap(query, refined_query, src["contexts"])
+
+            # Atribuir fuente a cada nodo y calcular porcentajes globales
+            pct = self.attribute_step_sources(roadmap, src["corpus_contexts"], src["web_contexts"])
+            roadmap["sources"] = {
+                "corpus_pct":      pct["corpus_pct"],
+                "web_pct":         pct["web_pct"],
+                "mode":            src["mode"],
+                "best_score":      src["best_score"],
+                "n_corpus_chunks": len(src["corpus_contexts"]),
+                "n_web_chunks":    len(src["web_contexts"]),
+            }
+            print(f"  [Fuentes] {pct['corpus_pct']}% corpus / {pct['web_pct']}% web  (modo: {src['mode']})")
+            return roadmap
 
         except Exception as e:
             print(f"Error generando roadmap: {e}")
@@ -208,7 +287,8 @@ class RagEngine:
                 "steps": [{
                     "id": "err", "label": "Error de Sistema",
                     "description": str(e)[:200], "type": "decision", "key_points": []
-                }]
+                }],
+                "sources": {"corpus_pct": 0, "web_pct": 0, "mode": "error"},
             }
 
     def build_roadmap(self, original_query: str, refined_query: str, contexts: list):
