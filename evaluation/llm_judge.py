@@ -94,6 +94,11 @@ PREGUNTA DEL USUARIO
 {question}
 
 ═══════════════════════════════════
+CONSULTA REFINADA USADA PARA RECUPERAR CONTEXTO
+═══════════════════════════════════
+{refined_question}
+
+═══════════════════════════════════
 CONTEXTO RECUPERADO (RAG)
 ═══════════════════════════════════
 {context}
@@ -122,7 +127,7 @@ SECCIÓN 1 — CRITERIOS CLÁSICOS (0-10):
   completeness:       ¿Incluye todos los pasos esenciales?
   coherence:          ¿Los pasos están en orden lógico?
   technical_accuracy: ¿Los detalles técnicos son correctos?
-  context_fidelity:   ¿Se basa en el contexto sin inventar datos?
+  context_fidelity:   ¿Se basa en el contexto recuperado, que es el mismo contexto usado por el generador?
   Escala: 0-3 deficiente | 4-6 aceptable | 7-8 bueno | 9-10 excelente
 
 SECCIÓN 2 — ANÁLISIS DE SECUENCIA (detallado):
@@ -198,10 +203,12 @@ class LLMJudgeEvaluator:
         contexts:     List[str],
         ground_truth: str,
         steps_list:   str,
+        refined_question: str = "",
     ) -> dict:
-        context_text = "\n---\n".join(contexts[:3]) if contexts else "Sin contexto."
+        context_text = "\n---\n".join(contexts) if contexts else "Sin contexto."
         prompt = _PROMPT_TEMPLATE.format(
             question=question,
+            refined_question=refined_question or "(No disponible)",
             context=context_text[:3500],
             roadmap=roadmap_text[:2500],
             ground_truth=ground_truth,
@@ -352,6 +359,7 @@ class LLMJudgeEvaluator:
                     contexts=result["contexts"],
                     ground_truth=sample.ground_truth,
                     steps_list=steps_str,
+                    refined_question=result.get("refined_question", ""),
                 )
 
                 # Calcular derivados
@@ -369,10 +377,13 @@ class LLMJudgeEvaluator:
 
                 sample_result = {
                     "question":       sample.question,
+                    "refined_question": result.get("refined_question", ""),
                     "category":       sample.category,
                     "ground_truth":   sample.ground_truth,
                     "answer":         result["answer"],
                     "contexts":       result["contexts"],
+                    "retrieval":      result.get("retrieval", {}),
+                    "judge_context_strategy": result.get("judge_context_strategy", ""),
                     "roadmap":        result["roadmap"],
                     "steps":          adapter.steps_as_list(result["roadmap"]),
                     "expected_steps": sample.expected_step_order,

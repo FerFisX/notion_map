@@ -18,16 +18,27 @@ class RagAdapter:
         print("  RagEngine listo.")
 
     def query(self, question: str) -> dict:
-        """Retorna question, answer (texto), contexts y roadmap (dict)."""
-        contexts = self.engine.retrieve_contexts(question)
-        roadmap  = self.engine.generate_roadmap(question)
-        answer   = self.roadmap_to_text(roadmap)
+        """
+        Retorna la respuesta y la traza RAG usada para generarla.
+
+        Importante: los contextos devueltos son exactamente los mismos que vio
+        el generador del roadmap. Esto evita que el judge evalúe con contexto
+        recuperado desde otra query.
+        """
+        trace   = self.engine.generate_roadmap_with_trace(question)
+        roadmap = trace["roadmap"]
+        answer  = self.roadmap_to_text(roadmap)
 
         return {
-            "question": question,
-            "answer":   answer,
-            "contexts": contexts,
-            "roadmap":  roadmap,
+            "question":               question,
+            "refined_question":       trace.get("refined_question", ""),
+            "answer":                 answer,
+            "contexts":               trace.get("contexts", []),
+            "corpus_contexts":        trace.get("corpus_contexts", []),
+            "web_contexts":           trace.get("web_contexts", []),
+            "retrieval":              trace.get("retrieval", {}),
+            "judge_context_strategy": "generator_context",
+            "roadmap":                roadmap,
         }
 
     @staticmethod
