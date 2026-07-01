@@ -260,7 +260,14 @@ class RagEngine:
             "web_pct":    round(web_n / total * 100),
         }
 
-    def generate_roadmap(self, query: str):
+    def generate_roadmap_with_trace(self, query: str) -> dict:
+        """
+        Genera el roadmap y devuelve la traza completa del RAG.
+
+        Esta traza permite que evaluadores externos (LLM Judge, RAGAS, reportes)
+        usen exactamente la misma consulta refinada y los mismos contextos que
+        vio el generador, evitando evaluar contra un retrieval distinto.
+        """
         try:
             refined_query = self.rewrite_query(query)
             print(f"  [Retrieval] Buscando con consulta refinada...")
@@ -278,11 +285,25 @@ class RagEngine:
                 "n_web_chunks":    len(src["web_contexts"]),
             }
             print(f"  [Fuentes] {pct['corpus_pct']}% corpus / {pct['web_pct']}% web  (modo: {src['mode']})")
-            return roadmap
+            return {
+                "question":            query,
+                "refined_question":    refined_query,
+                "contexts":            src["contexts"],
+                "corpus_contexts":     src["corpus_contexts"],
+                "web_contexts":        src["web_contexts"],
+                "retrieval": {
+                    "mode":            src["mode"],
+                    "best_score":      src["best_score"],
+                    "n_contexts":      len(src["contexts"]),
+                    "n_corpus_chunks": len(src["corpus_contexts"]),
+                    "n_web_chunks":    len(src["web_contexts"]),
+                },
+                "roadmap":             roadmap,
+            }
 
         except Exception as e:
             print(f"Error generando roadmap: {e}")
-            return {
+            roadmap = {
                 "title": "Error",
                 "steps": [{
                     "id": "err", "label": "Error de Sistema",
@@ -290,6 +311,19 @@ class RagEngine:
                 }],
                 "sources": {"corpus_pct": 0, "web_pct": 0, "mode": "error"},
             }
+            return {
+                "question":         query,
+                "refined_question": "",
+                "contexts":         [],
+                "corpus_contexts":  [],
+                "web_contexts":     [],
+                "retrieval":        {"mode": "error", "best_score": 0, "n_contexts": 0},
+                "roadmap":          roadmap,
+            }
+
+    def generate_roadmap(self, query: str):
+        """Mantiene compatibilidad: devuelve solo el roadmap."""
+        return self.generate_roadmap_with_trace(query)["roadmap"]
 
     def build_roadmap(self, original_query: str, refined_query: str, contexts: list):
         """Construye el roadmap con la consulta refinada y los contextos ya recuperados."""
