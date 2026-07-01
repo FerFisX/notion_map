@@ -15,6 +15,7 @@ class RagAdapter:
     def __init__(self):
         print("  Cargando RagEngine (embeddings + ChromaDB + Bedrock)...")
         self.engine = RagEngine()
+        self.context_strategy = os.getenv("EVAL_CONTEXT_STRATEGY", "generator_context").lower().strip()
         print("  RagEngine listo.")
 
     def query(self, question: str) -> dict:
@@ -25,19 +26,33 @@ class RagAdapter:
         el generador del roadmap. Esto evita que el judge evalúe con contexto
         recuperado desde otra query.
         """
-        trace   = self.engine.generate_roadmap_with_trace(question)
+        trace = self.engine.generate_roadmap_with_trace(question)
+        if self.context_strategy == "legacy_original_query":
+            contexts = self.engine.retrieve_contexts(question)
+            trace["contexts"] = contexts
+            trace["corpus_contexts"] = contexts
+            trace["web_contexts"] = []
+            trace["retrieval"] = {
+                **trace.get("retrieval", {}),
+                "context_strategy": "legacy_original_query",
+                "n_contexts": len(contexts),
+            }
+        else:
+            contexts = trace.get("contexts", [])
+
         roadmap = trace["roadmap"]
         answer  = self.roadmap_to_text(roadmap)
 
         return {
             "question":               question,
+            "query_intent":           trace.get("query_intent", {}),
             "refined_question":       trace.get("refined_question", ""),
             "answer":                 answer,
-            "contexts":               trace.get("contexts", []),
+            "contexts":               contexts,
             "corpus_contexts":        trace.get("corpus_contexts", []),
             "web_contexts":           trace.get("web_contexts", []),
             "retrieval":              trace.get("retrieval", {}),
-            "judge_context_strategy": "generator_context",
+            "judge_context_strategy": self.context_strategy,
             "roadmap":                roadmap,
         }
 

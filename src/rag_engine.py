@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -31,6 +32,10 @@ WEB_FALLBACK_MIN = float(os.getenv("WEB_FALLBACK_THRESHOLD", "0.25"))
 #   WEB_FALLBACK_MIN <= score < WEB_HYBRID_MIN -> híbrido (corpus + web)
 #   score < WEB_FALLBACK_MIN                 -> mayormente web
 WEB_HYBRID_MIN = float(os.getenv("WEB_HYBRID_THRESHOLD", "0.45"))
+
+# Query refinement experiments.
+# Apagar esto permite reproducir el refinamiento genérico anterior.
+QUERY_INTENT_ENABLED = os.getenv("QUERY_INTENT_ENABLED", "true").lower().strip() in ("true", "1", "yes")
 
 
 class RoadmapStep(BaseModel):
@@ -71,16 +76,104 @@ class RagEngine:
         self.llm = get_llm(temperature=0.1, max_tokens=4096)
         self.parser = JsonOutputParser(pydantic_object=Roadmap)
 
-    def rewrite_query(self, raw_query: str) -> str:
+    def classify_query_intent(self, raw_query: str) -> dict:
+        """
+        Clasifica la intención de la consulta para orientar retrieval y generación.
+
+        La decisión queda en manos del LLM usando categorías generales; no depende
+        de reglas rígidas por palabras clave.
+        """
+        prompt = f"""\
+        Eres un analista de intención para un sistema RAG que genera roadmaps técnicos.
+        Clasifica la consulta del usuario y define cómo debe transformarse para construir
+        un roadmap útil.
+
+        Categorías disponibles:
+        - conceptual_learning: el usuario pregunta qué es/qué son/para qué sirve algo y necesita convertirlo en un proceso de aprendizaje aplicable.
+        - implementation: el usuario quiere construir, configurar, implementar o aplicar algo.
+        - troubleshooting: el usuario tiene un error, bloqueo o comportamiento inesperado.
+        - comparison: el usuario quiere comparar alternativas, enfoques o herramientas.
+        - optimization: el usuario quiere mejorar rendimiento, calidad, costos o precisión.
+        - exploratory: la intención es amplia o ambigua y necesita exploración ordenada.
+
+        Responde SOLO con JSON válido:
+        {{
+        "intent": "<una categoría>",
+        "roadmap_goal": "<objetivo accionable del roadmap en el idioma de la consulta>",
+        "retrieval_focus": "<qué conocimiento debe buscarse en la base para responder bien>",
+        "generation_guidance": "<cómo debe comportarse el generador del roadmap>",
+        "confidence": <número entre 0 y 1>
+        }}
+
+        Consulta del usuario:
+        {raw_query}
+        """
+        default = {
+            "intent": "exploratory",
+            "roadmap_goal": raw_query,
+            "retrieval_focus": raw_query,
+            "generation_guidance": "Construye un roadmap técnico, ordenado y accionable.",
+            "confidence": 0.0,
+        }
+        try:
+            raw = self.llm.invoke(prompt).content.strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            raw = raw.strip()
+            if not raw.startswith("{"):
+                start = raw.find("{")
+                end = raw.rfind("}")
+                if start >= 0 and end > start:
+                    raw = raw[start:end + 1]
+            intent = json.loads(raw)
+            result = {**default, **intent}
+            result["confidence"] = float(result.get("confidence") or 0.0)
+        except Exception as e:
+            print(f"  [Query Intent] No se pudo clasificar ({e}); usando intención exploratoria.")
+            result = default
+
+        print(
+            "  [Query Intent]\n"
+            f"    Intent   : {result.get('intent')}\n"
+            f"    Objetivo : {result.get('roadmap_goal')}\n"
+            f"    Confianza: {result.get('confidence'):.2f}"
+        )
+        return result
+
+    def rewrite_query(self, raw_query: str, query_intent: dict = None) -> str:
         """Expande la consulta del usuario para mejorar el retrieval y el roadmap."""
+        if QUERY_INTENT_ENABLED:
+            query_intent = query_intent or self.classify_query_intent(raw_query)
+            intent_section = (
+                "INTENCIÓN CLASIFICADA:\n"
+                f"- Tipo: {query_intent.get('intent', 'exploratory')}\n"
+                f"- Objetivo del roadmap: {query_intent.get('roadmap_goal', raw_query)}\n"
+                f"- Foco de retrieval: {query_intent.get('retrieval_focus', raw_query)}\n"
+                f"- Guía de generación: {query_intent.get('generation_guidance', '')}\n\n"
+            )
+            intent_rules = (
+                "- Si la intención es conceptual_learning, orienta la consulta hacia aprender, practicar y aplicar el concepto\n"
+                "- Si la intención es implementation, orienta la consulta hacia pasos de construcción o configuración\n"
+                "- Si la intención es troubleshooting, orienta la consulta hacia diagnóstico, causas y validaciones\n"
+                "- Si la intención es comparison, orienta la consulta hacia criterios de decisión, diferencias y casos de uso\n"
+            )
+        else:
+            query_intent = query_intent or {"intent": "disabled", "confidence": 0.0}
+            intent_section = ""
+            intent_rules = ""
+
         prompt = (
             "Eres un experto en sistemas RAG técnicos. "
             "Reescribe la siguiente consulta del usuario para hacerla más específica, técnica "
             "y adecuada para búsqueda semántica en una base de conocimiento.\n\n"
+            f"{intent_section}"
             "REGLAS:\n"
             "- Añade terminología técnica relevante del dominio\n"
             "- Especifica el objetivo final que el usuario quiere lograr\n"
             "- Expande siglas o términos ambiguos\n"
+            f"{intent_rules}"
             "- Mantén el idioma original\n"
             "- Responde SOLO con la consulta mejorada, sin explicaciones ni prefijos\n\n"
             f"Consulta original: {raw_query}\n\n"
@@ -269,10 +362,15 @@ class RagEngine:
         vio el generador, evitando evaluar contra un retrieval distinto.
         """
         try:
-            refined_query = self.rewrite_query(query)
+            query_intent = (
+                self.classify_query_intent(query)
+                if QUERY_INTENT_ENABLED
+                else {"intent": "disabled", "confidence": 0.0}
+            )
+            refined_query = self.rewrite_query(query, query_intent=query_intent)
             print(f"  [Retrieval] Buscando con consulta refinada...")
             src     = self.get_contexts_with_sources(refined_query)
-            roadmap = self.build_roadmap(query, refined_query, src["contexts"])
+            roadmap = self.build_roadmap(query, refined_query, src["contexts"], query_intent=query_intent)
 
             # Atribuir fuente a cada nodo y calcular porcentajes globales
             pct = self.attribute_step_sources(roadmap, src["corpus_contexts"], src["web_contexts"])
@@ -287,6 +385,7 @@ class RagEngine:
             print(f"  [Fuentes] {pct['corpus_pct']}% corpus / {pct['web_pct']}% web  (modo: {src['mode']})")
             return {
                 "question":            query,
+                "query_intent":        query_intent,
                 "refined_question":    refined_query,
                 "contexts":            src["contexts"],
                 "corpus_contexts":     src["corpus_contexts"],
@@ -313,6 +412,7 @@ class RagEngine:
             }
             return {
                 "question":         query,
+                "query_intent":     {"intent": "error", "confidence": 0.0},
                 "refined_question": "",
                 "contexts":         [],
                 "corpus_contexts":  [],
@@ -325,9 +425,30 @@ class RagEngine:
         """Mantiene compatibilidad: devuelve solo el roadmap."""
         return self.generate_roadmap_with_trace(query)["roadmap"]
 
-    def build_roadmap(self, original_query: str, refined_query: str, contexts: list):
+    def build_roadmap(self, original_query: str, refined_query: str, contexts: list, query_intent: dict = None):
         """Construye el roadmap con la consulta refinada y los contextos ya recuperados."""
         try:
+            query_intent = query_intent or {
+                "intent": "exploratory",
+                "roadmap_goal": original_query,
+                "generation_guidance": "Construye un roadmap técnico, ordenado y accionable.",
+            }
+            if QUERY_INTENT_ENABLED and query_intent.get("intent") not in ("disabled", "error"):
+                intent_context = (
+                    f"Tipo de intención: {query_intent.get('intent', 'exploratory')}\n"
+                    f"Objetivo accionable: {query_intent.get('roadmap_goal', original_query)}\n"
+                    f"Guía para el roadmap: {query_intent.get('generation_guidance', '')}"
+                )
+                intent_section = f"""\
+═══════════════════════════════════════════════════
+INTENCIÓN Y DIRECCIÓN DEL ROADMAP
+═══════════════════════════════════════════════════
+{intent_context}
+
+"""
+            else:
+                intent_context = ""
+                intent_section = ""
             context = "\n\n---\n\n".join(contexts) if contexts else (
                 "No hay contexto específico recuperado. "
                 "Genera pasos basados en conocimiento técnico general del dominio."
@@ -348,6 +469,7 @@ CONSULTA ENRIQUECIDA (usa esta para el roadmap)
 {refined_query}
 
 ═══════════════════════════════════════════════════
+{intent_section}═══════════════════════════════════════════════════
 CONTEXTO TÉCNICO RECUPERADO DE LA BASE DE CONOCIMIENTO
 ═══════════════════════════════════════════════════
 {context}
@@ -385,7 +507,7 @@ REGLAS GENERALES:
 """
             prompt = PromptTemplate(
                 template=template,
-                input_variables=["original_query", "refined_query", "context"],
+                input_variables=["original_query", "refined_query", "intent_section", "context"],
                 partial_variables={"format_instructions": self.parser.get_format_instructions()},
             )
 
@@ -393,6 +515,7 @@ REGLAS GENERALES:
             result = chain.invoke({
                 "original_query": original_query,
                 "refined_query":  refined_query,
+                "intent_section": intent_section,
                 "context":        context,
             })
             print(f"  [Generación] {len(result.get('steps', []))} pasos generados.")
