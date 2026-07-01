@@ -3,9 +3,11 @@
 import os
 import json
 import csv
+import html as html_lib
 from datetime import datetime
 
 from evaluation.config import config
+from src.llm_provider import active_model_name
 
 
 def save_json(data: dict, path: str):
@@ -22,7 +24,7 @@ def save_human_review_csv(judge_results: dict, path: str):
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "N°", "Pregunta", "Categoría",
+            "N°", "Pregunta", "Prompt mejorado", "Intención", "Estrategia rewrite", "Categoría",
             "Pasos generados (en orden)",
             "Pasos esperados",
             "Score MESE", "Score Secuencia", "Secuencia válida (IA)",
@@ -42,6 +44,9 @@ def save_human_review_csv(judge_results: dict, path: str):
             writer.writerow([
                 i,
                 s["question"],
+                s.get("refined_question", ""),
+                _intent_label(s),
+                s.get("rewrite_strategy", s.get("judge_context_strategy", "")),
                 s.get("category", ""),
                 steps,
                 exp,
@@ -71,6 +76,17 @@ def _bar(score: float, max_score: float = 10) -> str:
     return f'''<div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
       <div style="background:{color};width:{pct:.0f}%;height:10px;border-radius:4px"></div>
     </div>'''
+
+
+def _query_intent(sample: dict) -> dict:
+    value = sample.get("query_intent") or {}
+    if isinstance(value, dict):
+        return value
+    return {"intent": str(value)}
+
+
+def _intent_label(sample: dict) -> str:
+    return sample.get("intent") or _query_intent(sample).get("intent", "")
 
 
 def save_html(ragas_results: dict, judge_results: dict, path: str,
@@ -129,8 +145,8 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
         seq    = s["sequence_eval"]
         mese   = s["mese"]
         struct = s.get("structure", {})
-        steps  = "".join(f"<li>{p}</li>" for p in s.get("steps", []))
-        exp    = "".join(f"<li>{p}</li>" for p in s.get("expected_steps", []))
+        steps  = "".join(f"<li>{html_lib.escape(str(p))}</li>" for p in s.get("steps", []))
+        exp    = "".join(f"<li>{html_lib.escape(str(p))}</li>" for p in s.get("expected_steps", []))
         oor    = seq.get("out_of_order_steps", [])
         oor_html = "".join(f'<li style="color:#f5222d">{p}</li>' for p in oor) if oor else "<li style='color:#52c41a'>Ninguno</li>"
         verdict_badge  = _badge(s["verdict"],      "#52c41a" if s["verdict"]=="PASS"      else "#f5222d")
@@ -144,23 +160,48 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
             for v in struct.get("violations", [])
         ) or "<li style='color:#52c41a;font-size:11px'>Sin violaciones</li>"
         resp_time = s.get("response_time", 0)
+        question_html = html_lib.escape(s.get("question", ""))
+        refined_html = html_lib.escape(s.get("refined_question", ""))
+        intent = _query_intent(s)
+        intent_html = html_lib.escape(_intent_label(s))
+        intent_goal_html = html_lib.escape(intent.get("roadmap_goal", ""))
+        rewrite_strategy_html = html_lib.escape(s.get("rewrite_strategy", s.get("judge_context_strategy", "")))
+        refined_block = (
+            f'''<details style="margin-top:8px">
+              <summary style="cursor:pointer;color:#1890ff;font-size:12px">Ver prompt mejorado</summary>
+              <div style="font-size:12px;color:#555;margin-top:4px;line-height:1.35">{refined_html}</div>
+            </details>'''
+            if refined_html else
+            '<small style="color:#999">Prompt mejorado no disponible</small>'
+        )
+        intent_goal_block = (
+            f'''<details style="margin-top:4px">
+              <summary style="cursor:pointer;color:#666;font-size:12px">Ver objetivo/intención</summary>
+              <div style="font-size:12px;color:#555;margin-top:4px;line-height:1.35">{intent_goal_html}</div>
+            </details>'''
+            if intent_goal_html else ""
+        )
 
         human_rows += f'''
         <tr id="row-{i}">
           <td style="text-align:center;font-weight:bold">{i}</td>
           <td style="max-width:200px">
-            <strong>{s["question"]}</strong><br>
+            <strong>{question_html}</strong><br>
             {_badge(s.get("category",""), "#722ed1")}<br>
+            <small style="color:#666">intent={intent_html or "N/A"}</small><br>
+            <small style="color:#666">rewrite={rewrite_strategy_html or "N/A"}</small><br>
             <small style="color:#999">t={resp_time:.1f}s</small>
+            {refined_block}
+            {intent_goal_block}
           </td>
-          <td>
-            <details>
+          <td class="steps-cell">
+            <details open>
               <summary style="cursor:pointer;color:#1890ff">Ver pasos generados ({len(s.get("steps",[]))})</summary>
-              <ol style="padding-left:16px;margin:4px 0">{steps}</ol>
+              <ol class="steps-list">{steps}</ol>
             </details>
-            <details style="margin-top:4px">
+            <details open style="margin-top:8px">
               <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
-              <ol style="padding-left:16px;margin:4px 0">{exp}</ol>
+              <ol class="steps-list">{exp}</ol>
             </details>
           </td>
           <td>
@@ -347,6 +388,9 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
   td {{ padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0;
         vertical-align: top; }}
   tr:hover td {{ background: #fafafa; }}
+  .steps-cell {{ min-width: 320px; max-width: 460px; }}
+  .steps-list {{ padding-left: 18px; margin: 6px 0 0; line-height: 1.35; }}
+  .steps-list li {{ margin-bottom: 4px; }}
   details summary::-webkit-details-marker {{ display:none; }}
   .export-btn {{ background: #1890ff; color: #fff; border: none; padding: 8px 20px;
                  border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 16px; }}
@@ -356,7 +400,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
 <body>
 
 <h1>NotionMap — Reporte de Evaluación</h1>
-<div class="meta">Generado: {now} &nbsp;|&nbsp; Modelo: {config.bedrock_model_id}</div>
+<div class="meta">Generado: {now} &nbsp;|&nbsp; Modelo: {active_model_name()}</div>
 
 <!-- Tarjetas resumen -->
 <h2>Resumen General</h2>
@@ -386,8 +430,6 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
 <!-- LLM Judge + Tabla Humana -->
 <h2>LLM Judge + Revisión Humana</h2>
 <p style="font-size:13px;color:#888;margin-bottom:12px">
-  Las 4 dimensiones MESE (Mapping, Exhaustiveness, Sequence, Experience) siguen el
-  principio MECE: mutuamente excluyentes y colectivamente exhaustivas.<br>
   Completa las columnas amarillas y exporta con el botón.
 </p>
 <div style="overflow-x:auto">

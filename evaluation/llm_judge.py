@@ -377,6 +377,7 @@ class LLMJudgeEvaluator:
 
                 sample_result = {
                     "question":       sample.question,
+                    "query_intent":   result.get("query_intent", {}),
                     "refined_question": result.get("refined_question", ""),
                     "category":       sample.category,
                     "ground_truth":   sample.ground_truth,
