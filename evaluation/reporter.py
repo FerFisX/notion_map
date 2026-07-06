@@ -27,7 +27,9 @@ def save_human_review_csv(judge_results: dict, path: str):
             "N°", "Pregunta", "Prompt mejorado", "Intención", "Estrategia rewrite", "Categoría",
             "Pasos generados (en orden)",
             "Pasos esperados",
-            "Score MESE", "Score Secuencia", "Secuencia válida (IA)",
+            "Readiness", "Readiness reason",
+            "Score Resumen", "Grounding", "Completeness", "Logical Order", "Actionability",
+            "Score Secuencia", "Secuencia válida (IA)",
             "Pasos fuera de orden (IA)", "Sugerencia de reorden (IA)",
             # columnas para el humano
             "Nota Humana Secuencia (0-10)", "Nota Humana General (0-10)",
@@ -37,6 +39,7 @@ def save_human_review_csv(judge_results: dict, path: str):
         for i, s in enumerate(judge_results.get("per_sample", []), 1):
             seq     = s["sequence_eval"]
             mese    = s["mese"]
+            readiness = s.get("roadmap_readiness", {})
             steps   = "\n".join([f"{j+1}. {p}" for j, p in enumerate(s.get("steps", []))])
             exp     = "\n".join([f"{j+1}. {p}" for j, p in enumerate(s.get("expected_steps", []))])
             oor     = "; ".join(seq.get("out_of_order_steps", []))
@@ -50,7 +53,13 @@ def save_human_review_csv(judge_results: dict, path: str):
                 s.get("category", ""),
                 steps,
                 exp,
+                readiness.get("status", ""),
+                readiness.get("reason", ""),
                 round(mese["composite"], 2),
+                round(mese["mapping"], 2),
+                round(mese["exhaustiveness"], 2),
+                round(mese["sequence"], 2),
+                round(mese["experience"], 2),
                 round(seq["score"], 2),
                 "Sí" if seq["is_valid"] else "No",
                 oor or "—",
@@ -69,6 +78,13 @@ def _score_color(score: float) -> str:
 
 def _badge(text: str, color: str) -> str:
     return f'<span style="background:{color};color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">{text}</span>'
+
+def _readiness_color(status: str) -> str:
+    if status == "READY":
+        return "#52c41a"
+    if status == "NEEDS_REVIEW":
+        return "#fa8c16"
+    return "#f5222d"
 
 def _bar(score: float, max_score: float = 10) -> str:
     pct = max(0, min(100, (score / max_score) * 100))
@@ -99,19 +115,33 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
     corpus_agg = corpus_results.get("aggregated", {}) if corpus_results else {}
     pass_rate  = judge_results.get("pass_rate", 0)    if judge_results  else 0
     mese_rate  = judge_results.get("mese_pass_rate", 0) if judge_results else 0
+    readiness_agg = judge_agg.get("readiness", {}) if judge_agg else {}
+    roadmap_agg = judge_agg.get("roadmap", {}) if judge_agg else {}
+    grounding_agg = judge_agg.get("grounding", {}) if judge_agg else {}
+    ready_rate = readiness_agg.get("ready_rate", judge_results.get("readiness_ready_rate", 0) if judge_results else 0)
+    fail_rate = readiness_agg.get("fail_rate", judge_results.get("readiness_fail_rate", 0) if judge_results else 0)
 
     # tarjetas resumen
     summary_cards = ""
     all_cards = []
     if judge_agg:
         all_cards += [
-            ("Score General",   judge_agg.get("overall_score", 0)),
-            ("MESE Compuesto",  judge_agg.get("mese", {}).get("composite", 0)),
-            ("Secuencia",       judge_agg.get("sequence", {}).get("mean_score", 0)),
-            ("Estructura",      judge_agg.get("structure", {}).get("mean_score", 0)),
+            ("Grounding",       grounding_agg.get("support_score", 0)),
+            ("Completeness",    roadmap_agg.get("completeness", 0)),
+            ("Logical Order",   roadmap_agg.get("logical_order", 0)),
+            ("Actionability",   roadmap_agg.get("actionability", 0)),
+            ("Structure",       judge_agg.get("structure", {}).get("mean_score", 0)),
         ]
     if corpus_results and "overall_corpus_score" in corpus_results:
         all_cards.append(("Corpus",  corpus_results["overall_corpus_score"]))
+    if judge_agg:
+        summary_cards += f'''
+        <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;
+                    box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:170px">
+          <div style="font-size:32px;font-weight:700;color:{'#52c41a' if ready_rate >= 0.7 else '#fa8c16' if ready_rate > 0 else '#f5222d'}">{ready_rate:.0%}</div>
+          <div style="font-size:13px;color:#666;margin-top:4px">Roadmaps Ready</div>
+          {_bar(ready_rate * 10)}
+        </div>'''
     for label, val in all_cards:
         color = _score_color(val)
         summary_cards += f'''
@@ -144,6 +174,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
     for i, s in enumerate((judge_results or {}).get("per_sample", []), 1):
         seq    = s["sequence_eval"]
         mese   = s["mese"]
+        readiness = s.get("roadmap_readiness", {})
         struct = s.get("structure", {})
         steps  = "".join(f"<li>{html_lib.escape(str(p))}</li>" for p in s.get("steps", []))
         exp    = "".join(f"<li>{html_lib.escape(str(p))}</li>" for p in s.get("expected_steps", []))
@@ -155,6 +186,9 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
                                 "#52c41a" if seq["is_valid"] else "#f5222d")
         struct_verdict = struct.get("verdict", "N/A")
         struct_badge   = _badge(struct_verdict, "#52c41a" if struct_verdict=="PASS" else "#f5222d")
+        readiness_status = readiness.get("status", "N/A")
+        readiness_badge = _badge(readiness_status, _readiness_color(readiness_status))
+        readiness_reason_html = html_lib.escape(readiness.get("reason", ""))
         struct_violations_html = "".join(
             f'<li style="color:#f5222d;font-size:11px">{v}</li>'
             for v in struct.get("violations", [])
@@ -217,16 +251,20 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
           </td>
           <td>
             <table style="font-size:12px;width:100%">
-              <tr><td>Mapping</td><td style="color:{_score_color(mese["mapping"])}">{mese["mapping"]:.1f}</td></tr>
-              <tr><td>Exhaustividad</td><td style="color:{_score_color(mese["exhaustiveness"])}">{mese["exhaustiveness"]:.1f}</td></tr>
-              <tr><td>Secuencia</td><td style="color:{_score_color(mese["sequence"])}">{mese["sequence"]:.1f}</td></tr>
-              <tr><td>Experiencia</td><td style="color:{_score_color(mese["experience"])}">{mese["experience"]:.1f}</td></tr>
+              <tr><td>Grounding</td><td style="color:{_score_color(mese["mapping"])}">{mese["mapping"]:.1f}</td></tr>
+              <tr><td>Completeness</td><td style="color:{_score_color(mese["exhaustiveness"])}">{mese["exhaustiveness"]:.1f}</td></tr>
+              <tr><td>Logical Order</td><td style="color:{_score_color(mese["sequence"])}">{mese["sequence"]:.1f}</td></tr>
+              <tr><td>Actionability</td><td style="color:{_score_color(mese["experience"])}">{mese["experience"]:.1f}</td></tr>
               <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>MESE</td>
+                <td>Summary</td>
                 <td style="color:{_score_color(mese["composite"])}">{mese["composite"]:.1f}</td>
               </tr>
             </table>
-            {mese_badge}
+            <small style="color:#999">Legacy MESE keys preserved internally</small>
+          </td>
+          <td>
+            {readiness_badge}<br>
+            <small style="color:#666">{readiness_reason_html}</small>
           </td>
           <td>
             {struct_badge} {struct.get("score", 0):.1f}/10<br>
@@ -408,14 +446,14 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
 
 <div class="rates">
   <div class="rate-box">
-    <div style="font-size:22px;font-weight:700;color:{'#52c41a' if pass_rate>=0.7 else '#f5222d'}">
-      {pass_rate:.0%}</div>
-    <div style="font-size:13px;color:#666">Pass Rate (Judge)</div>
+    <div style="font-size:22px;font-weight:700;color:{'#52c41a' if ready_rate>=0.7 else '#fa8c16' if ready_rate>0 else '#f5222d'}">
+      {ready_rate:.0%}</div>
+    <div style="font-size:13px;color:#666">Ready Rate</div>
   </div>
   <div class="rate-box">
-    <div style="font-size:22px;font-weight:700;color:{'#52c41a' if mese_rate>=0.7 else '#f5222d'}">
-      {mese_rate:.0%}</div>
-    <div style="font-size:13px;color:#666">MESE Pass Rate</div>
+    <div style="font-size:22px;font-weight:700;color:{'#52c41a' if fail_rate==0 else '#f5222d'}">
+      {fail_rate:.0%}</div>
+    <div style="font-size:13px;color:#666">Fail Rate</div>
   </div>
   <div class="rate-box">
     <div style="font-size:22px;font-weight:700;color:{'#52c41a' if judge_agg.get('sequence',{}).get('valid_pct',0)>=0.7 else '#f5222d'}">
@@ -428,9 +466,9 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
 {"<h2>RAGAS — Métricas Automáticas</h2><table><thead><tr><th>Pregunta</th><th>Categoría</th><th>Faithfulness</th><th>Relevancy</th><th>Precision</th><th>Recall</th></tr></thead><tbody>" + ragas_rows + "</tbody></table>" if ragas_rows else ""}
 
 <!-- LLM Judge + Tabla Humana -->
-<h2>LLM Judge + Revisión Humana</h2>
+<h2>Stakeholder Insights + Developer Diagnostics</h2>
 <p style="font-size:13px;color:#888;margin-bottom:12px">
-  Completa las columnas amarillas y exporta con el botón.
+  La vista ejecutiva prioriza readiness y dimensiones claras. Los detalles técnicos quedan disponibles para debugging.
 </p>
 <div style="overflow-x:auto">
 <table>
@@ -440,7 +478,8 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
       <th>Pregunta</th>
       <th>Pasos / Secuencia esperada</th>
       <th>Análisis de Secuencia</th>
-      <th>MESE</th>
+      <th>Roadmap Quality</th>
+      <th>Readiness</th>
       <th>Estructura</th>
       <th>Score General</th>
       <th style="background:#fffbe6">Revisión Humana</th>
