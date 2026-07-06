@@ -79,6 +79,15 @@ def _aggregate_single(sample_result: dict) -> dict:
             key: sample_result["mese"][key]
             for key in mese_keys
         },
+        "roadmap": {
+            "completeness": sample_result["mese"]["exhaustiveness"],
+            "logical_order": sample_result["mese"]["sequence"],
+            "actionability": sample_result["mese"]["experience"],
+            "summary_score": sample_result["mese"]["composite"],
+        },
+        "grounding": {
+            "support_score": sample_result["mese"]["mapping"],
+        },
         "sequence": {
             "mean_score": sample_result["sequence_eval"]["score"],
             "valid_pct": 1.0 if sample_result["sequence_eval"].get("is_valid") else 0.0,
@@ -260,6 +269,11 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "mese.sequence": raw_judge["mese"]["sequence"],
         "mese.experience": raw_judge["mese"]["experience"],
         "mese.composite": raw_judge["mese"]["composite"],
+        "roadmap.completeness": raw_judge["mese"]["exhaustiveness"],
+        "roadmap.logical_order": raw_judge["mese"]["sequence"],
+        "roadmap.actionability": raw_judge["mese"]["experience"],
+        "roadmap.summary_score": raw_judge["mese"]["composite"],
+        "grounding.support_score": raw_judge["mese"]["mapping"],
         "structure.score": structure.get("score", 0),
         "structure.pass": 1 if structure.get("verdict") == "PASS" else 0,
         "similarity.tfidf": similarity.get("tfidf", 0),

@@ -436,6 +436,15 @@ class LLMJudgeEvaluator:
             k: round(sum(s["mese"][k] for s in per_sample) / n, 2)
             for k in mese_keys + ["composite"]
         }
+        roadmap_agg = {
+            "completeness": mese_agg.get("exhaustiveness", 0),
+            "logical_order": mese_agg.get("sequence", 0),
+            "actionability": mese_agg.get("experience", 0),
+            "summary_score": mese_agg.get("composite", 0),
+        }
+        grounding_agg = {
+            "support_score": mese_agg.get("mapping", 0),
+        }
         seq_scores    = [s["sequence_eval"]["score"] for s in per_sample]
         struct_scores = [s["structure"]["score"]     for s in per_sample]
         resp_times    = [s.get("response_time", 0)   for s in per_sample]
@@ -446,6 +455,8 @@ class LLMJudgeEvaluator:
             "overall_score": round(sum(s["overall_score"] for s in per_sample) / n, 2),
             "classic":       classic_agg,
             "mese":          mese_agg,
+            "roadmap":       roadmap_agg,
+            "grounding":     grounding_agg,
             "sequence": {
                 "mean_score": round(sum(seq_scores) / n, 2),
                 "valid_pct":  round(sum(1 for s in per_sample if s["sequence_eval"].get("is_valid")) / n, 2),
