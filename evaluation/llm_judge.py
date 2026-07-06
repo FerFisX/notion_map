@@ -253,6 +253,59 @@ class LLMJudgeEvaluator:
         )
 
     @staticmethod
+    def _roadmap_readiness(mese: dict, structure: dict) -> dict:
+        """Deterministic gating to avoid hiding critical failures behind averages."""
+        grounding = float(mese.get("mapping", 0))
+        completeness = float(mese.get("exhaustiveness", 0))
+        logical_order = float(mese.get("sequence", 0))
+        actionability = float(mese.get("experience", 0))
+        structure_score = float(structure.get("score", 0))
+
+        critical_reasons = []
+        review_reasons = []
+
+        if grounding < 5:
+            critical_reasons.append("Grounding below critical threshold")
+        elif grounding < 8:
+            review_reasons.append("Grounding needs review")
+
+        if logical_order < 5:
+            critical_reasons.append("Logical order below critical threshold")
+        elif logical_order < 7:
+            review_reasons.append("Logical order needs review")
+
+        if structure_score < 5:
+            critical_reasons.append("Structure below critical threshold")
+        elif structure_score < 7:
+            review_reasons.append("Structure needs review")
+
+        if completeness < 7:
+            review_reasons.append("Completeness needs review")
+
+        if actionability < 7:
+            review_reasons.append("Actionability needs review")
+
+        if critical_reasons:
+            readiness = "FAIL"
+            reasons = critical_reasons + review_reasons
+            code = 0
+        elif review_reasons:
+            readiness = "NEEDS_REVIEW"
+            reasons = review_reasons
+            code = 1
+        else:
+            readiness = "READY"
+            reasons = ["All gating dimensions meet readiness thresholds"]
+            code = 2
+
+        return {
+            "status": readiness,
+            "code": code,
+            "reasons": reasons,
+            "reason": "; ".join(reasons),
+        }
+
+    @staticmethod
     def _print_verbose(i: int, total: int, sample_result: dict) -> None:
         SEP  = "-" * 60
         SEP2 = "=" * 60
@@ -260,6 +313,7 @@ class LLMJudgeEvaluator:
         cl   = sample_result["classic"]
         mese = sample_result["mese"]
         seq  = sample_result["sequence_eval"]
+        readiness = sample_result.get("roadmap_readiness", {})
         ov   = sample_result["overall_score"]
         verd = sample_result["verdict"]
         mv   = sample_result["mese_verdict"]
@@ -348,6 +402,9 @@ class LLMJudgeEvaluator:
             print(f"      Dimension: {desc}")
             print(f"      Razon    : {jt}")
         print(f"    {'SUMMARY SCORE      ':20}  {mese['composite']:5.2f}  [{mv}]")
+        print(f"    {'READINESS          ':20}  {readiness.get('status', 'N/A')}")
+        if readiness.get("reason"):
+            print(f"      Motivo   : {readiness['reason']}")
 
         # Veredicto final
         print(f"\n  {SEP2}")
@@ -390,6 +447,7 @@ class LLMJudgeEvaluator:
 
                 # Validación de estructura (determinística, sin LLM)
                 struct_result = self.structure_validator.validate(result["roadmap"])
+                readiness = self._roadmap_readiness(raw["mese"], struct_result)
 
                 # similitud query-respuesta (metrica automatica)
                 similarity = query_answer_relevance(sample.question, result["answer"])
@@ -410,6 +468,7 @@ class LLMJudgeEvaluator:
                     "classic":        raw["classic"],
                     "sequence_eval":  raw["sequence_eval"],
                     "mese":           raw["mese"],
+                    "roadmap_readiness": readiness,
                     "structure":      struct_result,
                     "similarity":     similarity,
                     "response_time":  response_time,
@@ -433,14 +492,18 @@ class LLMJudgeEvaluator:
         pass_rate      = sum(1 for s in per_sample if s["verdict"] == "PASS") / len(per_sample)
         mese_pass_rate = sum(1 for s in per_sample if s["mese_verdict"] == "PASS") / len(per_sample)
         seq_valid_pct  = sum(1 for s in per_sample if s["sequence_eval"].get("is_valid")) / len(per_sample)
+        ready_rate     = sum(1 for s in per_sample if s.get("roadmap_readiness", {}).get("status") == "READY") / len(per_sample)
+        fail_rate      = sum(1 for s in per_sample if s.get("roadmap_readiness", {}).get("status") == "FAIL") / len(per_sample)
 
-        print(f"  Pass rate: {pass_rate:.0%} | MESE pass: {mese_pass_rate:.0%} | Secuencias OK: {seq_valid_pct:.0%}")
+        print(f"  Pass rate: {pass_rate:.0%} | MESE pass: {mese_pass_rate:.0%} | Secuencias OK: {seq_valid_pct:.0%} | Ready: {ready_rate:.0%}")
         return {
             "per_sample":     per_sample,
             "aggregated":     aggregated,
             "pass_rate":      round(pass_rate, 4),
             "mese_pass_rate": round(mese_pass_rate, 4),
             "seq_valid_pct":  round(seq_valid_pct, 4),
+            "readiness_ready_rate": round(ready_rate, 4),
+            "readiness_fail_rate":  round(fail_rate, 4),
         }
 
     @staticmethod
@@ -464,6 +527,12 @@ class LLMJudgeEvaluator:
         grounding_agg = {
             "support_score": mese_agg.get("mapping", 0),
         }
+        readiness_codes = [s.get("roadmap_readiness", {}).get("code", 0) for s in per_sample]
+        readiness_counts = {
+            "ready": sum(1 for s in per_sample if s.get("roadmap_readiness", {}).get("status") == "READY"),
+            "needs_review": sum(1 for s in per_sample if s.get("roadmap_readiness", {}).get("status") == "NEEDS_REVIEW"),
+            "fail": sum(1 for s in per_sample if s.get("roadmap_readiness", {}).get("status") == "FAIL"),
+        }
         seq_scores    = [s["sequence_eval"]["score"] for s in per_sample]
         struct_scores = [s["structure"]["score"]     for s in per_sample]
         resp_times    = [s.get("response_time", 0)   for s in per_sample]
@@ -476,6 +545,12 @@ class LLMJudgeEvaluator:
             "mese":          mese_agg,
             "roadmap":       roadmap_agg,
             "grounding":     grounding_agg,
+            "readiness": {
+                "mean_code": round(sum(readiness_codes) / n, 2),
+                "ready_rate": round(readiness_counts["ready"] / n, 2),
+                "needs_review_rate": round(readiness_counts["needs_review"] / n, 2),
+                "fail_rate": round(readiness_counts["fail"] / n, 2),
+            },
             "sequence": {
                 "mean_score": round(sum(seq_scores) / n, 2),
                 "valid_pct":  round(sum(1 for s in per_sample if s["sequence_eval"].get("is_valid")) / n, 2),

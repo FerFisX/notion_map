@@ -88,6 +88,12 @@ def _aggregate_single(sample_result: dict) -> dict:
         "grounding": {
             "support_score": sample_result["mese"]["mapping"],
         },
+        "readiness": {
+            "mean_code": sample_result["roadmap_readiness"]["code"],
+            "ready_rate": 1.0 if sample_result["roadmap_readiness"]["status"] == "READY" else 0.0,
+            "needs_review_rate": 1.0 if sample_result["roadmap_readiness"]["status"] == "NEEDS_REVIEW" else 0.0,
+            "fail_rate": 1.0 if sample_result["roadmap_readiness"]["status"] == "FAIL" else 0.0,
+        },
         "sequence": {
             "mean_score": sample_result["sequence_eval"]["score"],
             "valid_pct": 1.0 if sample_result["sequence_eval"].get("is_valid") else 0.0,
@@ -124,6 +130,8 @@ def _write_markdown(path: Path, payload: dict) -> None:
         f"- Modo retrieval: `{retrieval.get('mode', '')}`",
         f"- Score general: `{sample['overall_score']}/10`",
         f"- MESE compuesto: `{sample['mese']['composite']}/10`",
+        f"- Readiness: `{sample.get('roadmap_readiness', {}).get('status', 'N/A')}`",
+        f"- Readiness reason: `{sample.get('roadmap_readiness', {}).get('reason', '')}`",
         f"- Estructura: `{sample['structure']['score']}/10 ({sample['structure']['verdict']})`",
         f"- Similitud semántica: `{sample['similarity'].get('semantic', 0)}`",
         "",
@@ -181,6 +189,7 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
     verdict = "PASS" if overall >= config.pass_threshold else "FAIL"
     mese_verdict = "PASS" if raw_judge["mese"]["composite"] >= config.mese_pass_threshold else "FAIL"
     structure = StructureValidator().validate(roadmap)
+    readiness = judge._roadmap_readiness(raw_judge["mese"], structure)
     similarity = query_answer_relevance(question, answer)
 
     query_intent = result.get("query_intent", {}) or {}
@@ -207,6 +216,7 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "classic": raw_judge["classic"],
         "sequence_eval": raw_judge["sequence_eval"],
         "mese": raw_judge["mese"],
+        "roadmap_readiness": readiness,
         "structure": structure,
         "similarity": similarity,
         "response_time": response_time,
@@ -221,6 +231,8 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "pass_rate": 1.0 if verdict == "PASS" else 0.0,
         "mese_pass_rate": 1.0 if mese_verdict == "PASS" else 0.0,
         "seq_valid_pct": 1.0 if raw_judge["sequence_eval"].get("is_valid") else 0.0,
+        "readiness_ready_rate": 1.0 if readiness["status"] == "READY" else 0.0,
+        "readiness_fail_rate": 1.0 if readiness["status"] == "FAIL" else 0.0,
     }
 
     payload = {
@@ -274,6 +286,10 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "roadmap.actionability": raw_judge["mese"]["experience"],
         "roadmap.summary_score": raw_judge["mese"]["composite"],
         "grounding.support_score": raw_judge["mese"]["mapping"],
+        "roadmap.readiness_code": readiness["code"],
+        "roadmap.ready_rate": 1 if readiness["status"] == "READY" else 0,
+        "roadmap.needs_review_rate": 1 if readiness["status"] == "NEEDS_REVIEW" else 0,
+        "roadmap.fail_rate": 1 if readiness["status"] == "FAIL" else 0,
         "structure.score": structure.get("score", 0),
         "structure.pass": 1 if structure.get("verdict") == "PASS" else 0,
         "similarity.tfidf": similarity.get("tfidf", 0),
@@ -294,6 +310,7 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "comparison.retrieval_best_score": retrieval.get("best_score", sources.get("best_score", 0)),
         "comparison.source_corpus_pct": sources.get("corpus_pct", 0),
         "comparison.source_web_pct": sources.get("web_pct", 0),
+        "comparison.readiness_code": readiness["code"],
     }
     params = {
         "comparison_group": comparison_group,
@@ -314,6 +331,8 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "rerank_method": os.getenv("RERANK_METHOD", "mmr"),
         "retrieval_top_n": os.getenv("RETRIEVAL_TOP_N", "5"),
         "retrieval_pool_size": os.getenv("RETRIEVAL_POOL_SIZE", "10"),
+        "roadmap_readiness": readiness["status"],
+        "roadmap_readiness_reason": readiness["reason"],
     }
 
     mlflow.set_tracking_uri(TRACKING_URI)
@@ -343,6 +362,7 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "overall_score": overall,
         "mese_composite": raw_judge["mese"]["composite"],
         "structure_score": structure.get("score", 0),
+        "roadmap_readiness": readiness["status"],
         "query_intent": query_intent.get("intent", ""),
     }, ensure_ascii=False, indent=2))
 

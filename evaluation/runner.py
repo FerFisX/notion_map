@@ -22,6 +22,7 @@ def print_summary(judge_results: dict, ragas_results: dict, corpus_results: dict
     if judge_results:
         agg    = judge_results["aggregated"]
         mese   = agg.get("mese", {})
+        readiness = agg.get("readiness", {})
         seq    = agg.get("sequence", {})
         struct = agg.get("structure", {})
         rt     = agg.get("response_time", {})
@@ -35,6 +36,8 @@ def print_summary(judge_results: dict, ragas_results: dict, corpus_results: dict
         print(f"  │    Secuencia:         {mese.get('sequence', 0):.2f}  <- peso 35%")
         print(f"  │    Experiencia:       {mese.get('experience', 0):.2f}")
         print(f"  ├─ MESE Pass Rate:      {judge_results['mese_pass_rate']:.0%}")
+        print(f"  ├─ Roadmaps Ready:      {readiness.get('ready_rate', judge_results.get('readiness_ready_rate', 0)):.0%}")
+        print(f"  ├─ Roadmaps Failed:     {readiness.get('fail_rate', judge_results.get('readiness_fail_rate', 0)):.0%}")
         print(f"  ├─ Secuencias OK:       {seq.get('valid_pct', 0):.0%}")
         print(f"  ├─ Estructura:          {struct.get('mean_score', 0):.2f}/10  (pass: {struct.get('pass_rate', 0):.0%})")
         print(f"  └─ Tiempo respuesta:    {rt.get('mean_s', 0):.1f}s promedio (max: {rt.get('max_s', 0):.1f}s)")
