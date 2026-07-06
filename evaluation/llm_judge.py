@@ -1,8 +1,9 @@
 """
 LLM-as-a-Judge para los roadmaps. Evalúa cada roadmap con criterios clásicos
-(relevancia, completitud, coherencia, precisión, fidelidad), las cuatro
-dimensiones MESE (Mapping, Exhaustiveness, Sequence, Experience), un análisis
-de secuencia dedicado, validación de estructura y similitud query-respuesta.
+(relevancia, completitud, coherencia, precisión, fidelidad), cuatro dimensiones
+principales de calidad de roadmap (grounding, completeness, logical order,
+actionability), un análisis de secuencia dedicado, validación de estructura y
+similitud query-respuesta.
 
 Fundamento — principio MECE (Minto, 1987):
   Las cuatro dimensiones se diseñaron bajo el principio MECE
@@ -11,9 +12,9 @@ Fundamento — principio MECE (Minto, 1987):
       (no se solapan). Se fuerza en el prompt del juez.
     - Colectivamente exhaustivas: juntas cubren toda la calidad del roadmap
       (correcto + completo + ordenado + claro), sin dejar nada fuera.
-  El acrónimo MESE corresponde a las iniciales de las cuatro dimensiones
-  (Mapping-Exhaustiveness-Sequence-Experience); el principio que las sustenta
-  es MECE.
+  Las claves legacy MESE se mantienen por compatibilidad interna, pero el
+  criterio conceptual recomendado usa nombres más explícitos:
+  grounding, completeness, logical order y actionability.
 """
 from __future__ import annotations
 
@@ -61,24 +62,30 @@ class SequenceEval(BaseModel):
 
 class MESEScores(BaseModel):
     """
-    Cuatro dimensiones MESE diseñadas bajo el principio MECE de Minto:
+    Cuatro dimensiones de calidad diseñadas bajo el principio MECE de Minto.
+    Las claves legacy se preservan por compatibilidad:
+    mapping -> grounding.support_score
+    exhaustiveness -> roadmap.completeness
+    sequence -> roadmap.logical_order
+    experience -> roadmap.actionability
+
     Mutually Exclusive (cada una mide algo que SOLO ella mide) y
     Collectively Exhaustive (juntas cubren toda la calidad del roadmap).
     """
     mapping:               int = Field(ge=0, le=10,
-        description="M — ¿Es factualmente preciso cada paso vs el contexto? NO evalúes cobertura ni orden ni claridad")
-    mapping_justification: str = Field(description="Evidencia específica de errores o aciertos factuales")
+        description="Grounding — ¿Cada paso está sustentado por el contexto recuperado? NO evalúes cobertura, orden ni claridad")
+    mapping_justification: str = Field(description="Evidencia específica de soporte contextual o afirmaciones no soportadas")
 
     exhaustiveness:               int = Field(ge=0, le=10,
-        description="E — ¿Están TODOS los pasos necesarios? ¿Falta algo? NO evalúes precisión ni orden ni claridad")
+        description="Completeness — ¿Están todos los pasos necesarios? NO evalúes grounding, orden ni claridad")
     exhaustiveness_justification: str = Field(description="Pasos faltantes detectados, o 'Cobertura completa'")
 
     sequence:               int = Field(ge=0, le=10,
-        description="S — ¿El ORDEN respeta dependencias causales? NO evalúes qué hay ni precisión ni claridad")
+        description="Logical order — ¿El orden respeta dependencias causales? NO evalúes contenido, grounding ni claridad")
     sequence_justification: str = Field(description="Dependencias causales violadas o 'Dependencias correctas'")
 
     experience:               int = Field(ge=0, le=10,
-        description="E — ¿Es CLARO y accionable para el usuario? NO evalúes precisión, cobertura ni orden")
+        description="Actionability — ¿El usuario puede entender y ejecutar cada paso? NO evalúes grounding, cobertura ni orden")
     experience_justification: str = Field(description="Pasos ambiguos detectados o 'Todos los pasos son accionables'")
 
     composite: float = Field(default=0.0, description="Score ponderado (calculado automáticamente)")
@@ -136,26 +143,38 @@ SECCIÓN 2 — ANÁLISIS DE SECUENCIA (detallado):
   - Lista los pasos fuera de orden por su label EXACTO
   - Si el orden está bien, pon out_of_order_steps: [] y suggested_fix: "Orden correcto"
 
-SECCIÓN 3 — MESE bajo principio MECE (CRÍTICO — cada dimensión es MUTUAMENTE EXCLUSIVA y, en conjunto, COLECTIVAMENTE EXHAUSTIVA):
-  MAPPING (M):
-    Evalúa SOLO si el CONTENIDO de cada paso es factualmente correcto.
-    Pregúntate: ¿dice algo falso o incorrecto según el contexto?
-    NO penalices por pasos faltantes, ni por orden, ni por claridad.
+SECCIÓN 3 — DIMENSIONES DE CALIDAD DEL ROADMAP BAJO PRINCIPIO MECE
+(CRÍTICO — cada dimensión es MUTUAMENTE EXCLUSIVA y, en conjunto, COLECTIVAMENTE EXHAUSTIVA):
 
-  EXHAUSTIVENESS (E):
-    Evalúa SOLO si HAY todos los pasos necesarios.
-    Pregúntate: ¿falta algún paso que debería estar?
-    NO penalices si los pasos existentes tienen errores, están desordenados, o son confusos.
+  IMPORTANTE:
+  El JSON conserva nombres legacy por compatibilidad, pero debes evaluarlos con estos significados nuevos:
+    mapping        = grounding.support_score
+    exhaustiveness = roadmap.completeness
+    sequence       = roadmap.logical_order
+    experience     = roadmap.actionability
 
-  SEQUENCE (S):
-    Evalúa SOLO el ORDEN de los pasos.
-    Pregúntate: ¿el paso i depende del paso j que viene después?
-    NO penalices si el contenido es incorrecto o si faltan pasos.
+  GROUNDING / SOPORTE CONTEXTUAL (legacy key: mapping):
+    Evalúa SOLO si cada paso del roadmap está sustentado por el CONTEXTO RECUPERADO.
+    Pregúntate: ¿el contexto disponible apoya explícitamente o razonablemente este paso?
+    Penaliza afirmaciones inventadas, detalles técnicos no soportados o pasos que contradicen el contexto.
+    NO penalices por pasos faltantes, orden incorrecto o falta de claridad.
 
-  EXPERIENCE (E):
-    Evalúa SOLO si el usuario puede ENTENDER Y EJECUTAR cada paso sin confusión.
-    Pregúntate: ¿hay pasos vagos como "configurar el sistema" sin especificar cómo?
-    NO penalices por precisión factual, cobertura ni orden.
+  COMPLETENESS / COMPLETITUD (legacy key: exhaustiveness):
+    Evalúa SOLO si el roadmap incluye todos los pasos necesarios para resolver la necesidad del usuario.
+    Pregúntate: ¿falta algún paso, concepto, validación, práctica o cierre importante?
+    NO penalices si los pasos existentes tienen bajo grounding, están desordenados o son poco accionables.
+
+  LOGICAL ORDER / ORDEN LÓGICO (legacy key: sequence):
+    Evalúa SOLO si el orden respeta dependencias causales y progresión de aprendizaje/ejecución.
+    Pregúntate: ¿algún paso requiere conocimiento, configuración o resultado que aparece después?
+    NO penalices por grounding bajo, pasos faltantes o vaguedad.
+
+  ACTIONABILITY / ACCIONABILIDAD (legacy key: experience):
+    Evalúa SOLO si el usuario puede entender y ejecutar cada paso sin confusión.
+    Pregúntate: ¿los pasos indican qué hacer, con qué herramienta/concepto y qué resultado esperar?
+    Penaliza pasos vagos como "aprender lo básico", "configurar el sistema" o "aplicar buenas prácticas"
+    si no explican una acción concreta.
+    NO penalices por grounding, cobertura u orden.
 
 JSON esperado (sin markdown):
 {{
@@ -175,14 +194,14 @@ JSON esperado (sin markdown):
     "explanation": "<análisis de dependencias causales>"
   }},
   "mese": {{
-    "mapping":                <0-10>,
-    "mapping_justification":  "<evidencia factual>",
-    "exhaustiveness":                <0-10>,
+    "mapping":                <0-10, grounding.support_score>,
+    "mapping_justification":  "<soporte contextual o afirmaciones no soportadas>",
+    "exhaustiveness":                <0-10, roadmap.completeness>,
     "exhaustiveness_justification":  "<pasos faltantes o 'Cobertura completa'>",
-    "sequence":                <0-10>,
+    "sequence":                <0-10, roadmap.logical_order>,
     "sequence_justification":  "<dependencias violadas o 'Dependencias correctas'>",
-    "experience":                <0-10>,
-    "experience_justification":  "<pasos ambiguos o 'Todos accionables'>",
+    "experience":                <0-10, roadmap.actionability>,
+    "experience_justification":  "<pasos vagos/accionables o 'Todos accionables'>",
     "composite": 0
   }}
 }}
@@ -313,13 +332,13 @@ class LLMJudgeEvaluator:
 
         # MESE
         print(f"\n  {SEP}")
-        print(f"  MESE  (principio MECE: Mutually Exclusive, Collectively Exhaustive)")
+        print(f"  ROADMAP QUALITY  (principio MECE: Mutually Exclusive, Collectively Exhaustive)")
         print(f"  {SEP}")
         mese_labels = [
-            ("mapping",        "M - Mapping        ", "Precision factual de cada paso vs contexto"),
-            ("exhaustiveness",  "E - Exhaustividad  ", "Cobertura: faltan pasos?"),
-            ("sequence",       "S - Secuencia      ", "Orden logico y dependencias causales"),
-            ("experience",     "E - Experiencia    ", "Claridad y usabilidad"),
+            ("mapping",        "Grounding          ", "Soporte contextual de cada paso"),
+            ("exhaustiveness",  "Completeness       ", "Cobertura de pasos necesarios"),
+            ("sequence",       "Logical order      ", "Orden logico y dependencias causales"),
+            ("experience",     "Actionability      ", "Claridad ejecutable para el usuario"),
         ]
         for key, label, desc in mese_labels:
             s   = mese[key]
@@ -328,7 +347,7 @@ class LLMJudgeEvaluator:
             print(f"    {label}  {score_label(s)}")
             print(f"      Dimension: {desc}")
             print(f"      Razon    : {jt}")
-        print(f"    {'MESE COMPUESTO     ':20}  {mese['composite']:5.2f}  [{mv}]")
+        print(f"    {'SUMMARY SCORE      ':20}  {mese['composite']:5.2f}  [{mv}]")
 
         # Veredicto final
         print(f"\n  {SEP2}")
