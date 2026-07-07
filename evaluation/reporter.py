@@ -189,6 +189,10 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
         readiness_status = readiness.get("status", "N/A")
         readiness_badge = _badge(readiness_status, _readiness_color(readiness_status))
         readiness_reason_html = html_lib.escape(readiness.get("reason", ""))
+        grounding_source = html_lib.escape(
+            s.get("grounding", {}).get("source")
+            or s.get("ragas_alignment", {}).get("grounding_source", "judge_fallback")
+        )
         struct_violations_html = "".join(
             f'<li style="color:#f5222d;font-size:11px">{v}</li>'
             for v in struct.get("violations", [])
@@ -260,7 +264,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
                 <td style="color:{_score_color(mese["composite"])}">{mese["composite"]:.1f}</td>
               </tr>
             </table>
-            <small style="color:#999">Legacy MESE keys preserved internally</small>
+            <small style="color:#999">Grounding source: {grounding_source}</small>
           </td>
           <td>
             {readiness_badge}<br>
