@@ -9,6 +9,7 @@ sys.path.insert(0, BASE_DIR)
 
 from evaluation.config  import config
 from evaluation.dataset import EVAL_SAMPLES
+from evaluation.ragas_alignment import align_judge_with_ragas
 from evaluation.rag_adapter import RagAdapter
 from evaluation.reporter import save_json, save_html, save_human_review_csv
 from evaluation.tracking import log_evaluation
@@ -21,21 +22,21 @@ def print_summary(judge_results: dict, ragas_results: dict, corpus_results: dict
 
     if judge_results:
         agg    = judge_results["aggregated"]
-        mese   = agg.get("mese", {})
+        roadmap = agg.get("roadmap", {})
+        grounding = agg.get("grounding", {})
         readiness = agg.get("readiness", {})
         seq    = agg.get("sequence", {})
         struct = agg.get("structure", {})
         rt     = agg.get("response_time", {})
 
-        print(f"\n  LLM Judge")
+        print(f"\n  Roadmap Evaluation")
         print(f"  ├─ Score General:       {agg.get('overall_score', 0):.2f}/10")
         print(f"  ├─ Pass Rate:           {judge_results['pass_rate']:.0%}")
-        print(f"  ├─ MESE Compuesto:      {mese.get('composite', 0):.2f}/10")
-        print(f"  │    Mapping:           {mese.get('mapping', 0):.2f}")
-        print(f"  │    Exhaustividad:     {mese.get('exhaustiveness', 0):.2f}")
-        print(f"  │    Secuencia:         {mese.get('sequence', 0):.2f}  <- peso 35%")
-        print(f"  │    Experiencia:       {mese.get('experience', 0):.2f}")
-        print(f"  ├─ MESE Pass Rate:      {judge_results['mese_pass_rate']:.0%}")
+        print(f"  ├─ Summary Score:       {roadmap.get('summary_score', 0):.2f}/10")
+        print(f"  │    Grounding:         {grounding.get('support_score', 0):.2f}")
+        print(f"  │    Completeness:      {roadmap.get('completeness', 0):.2f}")
+        print(f"  │    Logical Order:     {roadmap.get('logical_order', 0):.2f}")
+        print(f"  │    Actionability:     {roadmap.get('actionability', 0):.2f}")
         print(f"  ├─ Roadmaps Ready:      {readiness.get('ready_rate', judge_results.get('readiness_ready_rate', 0)):.0%}")
         print(f"  ├─ Roadmaps Failed:     {readiness.get('fail_rate', judge_results.get('readiness_fail_rate', 0)):.0%}")
         print(f"  ├─ Secuencias OK:       {seq.get('valid_pct', 0):.0%}")
@@ -94,6 +95,8 @@ def run(mode: str = "all", n_samples: int = None, html: bool = True,
     if mode in ("judge", "all"):
         from evaluation.llm_judge import run_judge
         judge_results = run_judge(adapter, samples, verbose=verbose)
+
+    judge_results = align_judge_with_ragas(judge_results, ragas_results)
 
     # validacion de estructura sin LLM
     if mode == "structure":
