@@ -29,6 +29,7 @@ from evaluation.config import config, EvalConfig
 from evaluation.dataset import EvalSample
 from evaluation.rag_adapter import RagAdapter
 from evaluation.structure_validator import StructureValidator
+from evaluation.step_semantic_judge import StepSemanticJudge
 from evaluation.similarity_metrics import query_answer_relevance
 from src.llm_provider import get_llm, active_model_name
 
@@ -214,6 +215,7 @@ class LLMJudgeEvaluator:
         self.cfg = cfg
         self.llm = get_llm(temperature=cfg.judge_temperature, max_tokens=4096)
         self.structure_validator = StructureValidator()
+        self.step_judge = StepSemanticJudge(self.llm)
 
     def _judge_single(
         self,
@@ -253,13 +255,14 @@ class LLMJudgeEvaluator:
         )
 
     @staticmethod
-    def _roadmap_readiness(mese: dict, structure: dict) -> dict:
+    def _roadmap_readiness(mese: dict, structure: dict, step_distinctness: dict | None = None) -> dict:
         """Deterministic gating to avoid hiding critical failures behind averages."""
         grounding = float(mese.get("mapping", 0))
         completeness = float(mese.get("exhaustiveness", 0))
         logical_order = float(mese.get("sequence", 0))
         actionability = float(mese.get("experience", 0))
         structure_score = float(structure.get("score", 0))
+        distinctness_score = float((step_distinctness or {}).get("score", 10))
 
         critical_reasons = []
         review_reasons = []
@@ -284,6 +287,11 @@ class LLMJudgeEvaluator:
 
         if actionability < 7:
             review_reasons.append("Actionability needs review")
+
+        if distinctness_score < 5:
+            critical_reasons.append("Step distinctness below critical threshold")
+        elif distinctness_score < 7:
+            review_reasons.append("Step distinctness needs review")
 
         if critical_reasons:
             readiness = "FAIL"
@@ -313,6 +321,7 @@ class LLMJudgeEvaluator:
         cl   = sample_result["classic"]
         mese = sample_result["mese"]
         seq  = sample_result["sequence_eval"]
+        step_distinctness = sample_result.get("step_distinctness", {})
         readiness = sample_result.get("roadmap_readiness", {})
         ov   = sample_result["overall_score"]
         verd = sample_result["verdict"]
@@ -402,6 +411,7 @@ class LLMJudgeEvaluator:
             print(f"      Dimension: {desc}")
             print(f"      Razon    : {jt}")
         print(f"    {'SUMMARY SCORE      ':20}  {mese['composite']:5.2f}  [{mv}]")
+        print(f"    {'STEP DISTINCTNESS  ':20}  {step_distinctness.get('score', 0):5.2f}")
         print(f"    {'READINESS          ':20}  {readiness.get('status', 'N/A')}")
         if readiness.get("reason"):
             print(f"      Motivo   : {readiness['reason']}")
@@ -447,7 +457,16 @@ class LLMJudgeEvaluator:
 
                 # Validación de estructura (determinística, sin LLM)
                 struct_result = self.structure_validator.validate(result["roadmap"])
-                readiness = self._roadmap_readiness(raw["mese"], struct_result)
+                step_eval = self.step_judge.evaluate(
+                    result["roadmap"],
+                    question=sample.question,
+                    refined_question=result.get("refined_question", ""),
+                    contexts=result["contexts"],
+                    category=sample.category,
+                )
+                step_distinctness = step_eval["step_distinctness"]
+                step_overlap = step_eval["step_overlap"]
+                readiness = self._roadmap_readiness(raw["mese"], struct_result, step_distinctness)
 
                 # similitud query-respuesta (metrica automatica)
                 similarity = query_answer_relevance(sample.question, result["answer"])
@@ -468,6 +487,8 @@ class LLMJudgeEvaluator:
                     "classic":        raw["classic"],
                     "sequence_eval":  raw["sequence_eval"],
                     "mese":           raw["mese"],
+                    "step_distinctness": step_distinctness,
+                    "step_overlap":   step_overlap,
                     "roadmap_readiness": readiness,
                     "structure":      struct_result,
                     "similarity":     similarity,
@@ -522,6 +543,21 @@ class LLMJudgeEvaluator:
             "completeness": mese_agg.get("exhaustiveness", 0),
             "logical_order": mese_agg.get("sequence", 0),
             "actionability": mese_agg.get("experience", 0),
+            "step_distinctness": round(
+                sum(s.get("step_distinctness", {}).get("score", 10) for s in per_sample) / n,
+                2,
+            ),
+            "weak_step_count": sum(
+                s.get("step_distinctness", {}).get("weak_step_count", 0)
+                for s in per_sample
+            ),
+            "step_overlap_issue_count": sum(
+                s.get("step_overlap", {}).get("issue_count", 0)
+                for s in per_sample
+            ),
+            "step_overlap_evaluated_count": sum(
+                1 for s in per_sample if s.get("step_overlap", {}).get("evaluated")
+            ),
             "summary_score": mese_agg.get("composite", 0),
         }
         grounding_agg = {

@@ -83,6 +83,10 @@ def _aggregate_single(sample_result: dict) -> dict:
             "completeness": sample_result["mese"]["exhaustiveness"],
             "logical_order": sample_result["mese"]["sequence"],
             "actionability": sample_result["mese"]["experience"],
+            "step_distinctness": sample_result.get("step_distinctness", {}).get("score", 10),
+            "weak_step_count": sample_result.get("step_distinctness", {}).get("weak_step_count", 0),
+            "step_overlap_issue_count": sample_result.get("step_overlap", {}).get("issue_count", 0),
+            "step_overlap_evaluated_count": 1 if sample_result.get("step_overlap", {}).get("evaluated") else 0,
             "summary_score": sample_result["mese"]["composite"],
         },
         "grounding": {
@@ -132,6 +136,7 @@ def _write_markdown(path: Path, payload: dict) -> None:
         f"- MESE compuesto: `{sample['mese']['composite']}/10`",
         f"- Readiness: `{sample.get('roadmap_readiness', {}).get('status', 'N/A')}`",
         f"- Readiness reason: `{sample.get('roadmap_readiness', {}).get('reason', '')}`",
+        f"- Step distinctness: `{sample.get('step_distinctness', {}).get('score', 0)}/10`",
         f"- Estructura: `{sample['structure']['score']}/10 ({sample['structure']['verdict']})`",
         f"- Similitud semántica: `{sample['similarity'].get('semantic', 0)}`",
         "",
@@ -158,6 +163,7 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
     from evaluation.rag_adapter import RagAdapter
     from evaluation.reporter import save_human_review_csv, save_html, save_json
     from evaluation.similarity_metrics import query_answer_relevance
+    from evaluation.step_semantic_judge import StepSemanticJudge
     from evaluation.structure_validator import StructureValidator
     from evaluation.tracking import ARTIFACT_DIR, EXPERIMENT, TRACKING_URI
     from src.llm_provider import active_model_name
@@ -189,7 +195,16 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
     verdict = "PASS" if overall >= config.pass_threshold else "FAIL"
     mese_verdict = "PASS" if raw_judge["mese"]["composite"] >= config.mese_pass_threshold else "FAIL"
     structure = StructureValidator().validate(roadmap)
-    readiness = judge._roadmap_readiness(raw_judge["mese"], structure)
+    step_eval = StepSemanticJudge().evaluate(
+        roadmap,
+        question=question,
+        refined_question=result.get("refined_question", ""),
+        contexts=result.get("contexts", []),
+        category="single_query",
+    )
+    step_distinctness = step_eval["step_distinctness"]
+    step_overlap = step_eval["step_overlap"]
+    readiness = judge._roadmap_readiness(raw_judge["mese"], structure, step_distinctness)
     similarity = query_answer_relevance(question, answer)
 
     query_intent = result.get("query_intent", {}) or {}
@@ -216,6 +231,8 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "classic": raw_judge["classic"],
         "sequence_eval": raw_judge["sequence_eval"],
         "mese": raw_judge["mese"],
+        "step_distinctness": step_distinctness,
+        "step_overlap": step_overlap,
         "roadmap_readiness": readiness,
         "structure": structure,
         "similarity": similarity,
@@ -276,14 +293,14 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "judge.classic.context_fidelity": raw_judge["classic"]["context_fidelity"]["score"],
         "judge.sequence.score": raw_judge["sequence_eval"]["score"],
         "judge.sequence.valid": 1 if raw_judge["sequence_eval"].get("is_valid") else 0,
-        "mese.mapping": raw_judge["mese"]["mapping"],
-        "mese.exhaustiveness": raw_judge["mese"]["exhaustiveness"],
-        "mese.sequence": raw_judge["mese"]["sequence"],
-        "mese.experience": raw_judge["mese"]["experience"],
-        "mese.composite": raw_judge["mese"]["composite"],
         "roadmap.completeness": raw_judge["mese"]["exhaustiveness"],
         "roadmap.logical_order": raw_judge["mese"]["sequence"],
         "roadmap.actionability": raw_judge["mese"]["experience"],
+        "step.distinctness.score": step_distinctness["score"],
+        "step.distinctness.weak_step_count": step_distinctness.get("weak_step_count", 0),
+        "step.overlap.evaluated": 1 if step_overlap.get("evaluated") else 0,
+        "step.overlap.issue_count": step_overlap.get("issue_count", 0),
+        "roadmap.step_distinctness": step_distinctness["score"],
         "roadmap.summary_score": raw_judge["mese"]["composite"],
         "grounding.support_score": raw_judge["mese"]["mapping"],
         "roadmap.readiness_code": readiness["code"],
@@ -302,11 +319,12 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "total_elapsed_s": response_time,
         "intent.confidence": float(query_intent.get("confidence") or 0),
         "comparison.overall_score": overall,
-        "comparison.mese_composite": raw_judge["mese"]["composite"],
+        "comparison.summary_score": raw_judge["mese"]["composite"],
         "comparison.structure_score": structure.get("score", 0),
         "comparison.similarity_semantic": similarity.get("semantic", 0),
         "comparison.similarity_tfidf": similarity.get("tfidf", 0),
         "comparison.roadmap_step_count": len(steps),
+        "comparison.step_distinctness": step_distinctness["score"],
         "comparison.retrieval_best_score": retrieval.get("best_score", sources.get("best_score", 0)),
         "comparison.source_corpus_pct": sources.get("corpus_pct", 0),
         "comparison.source_web_pct": sources.get("web_pct", 0),
@@ -362,6 +380,7 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
         "overall_score": overall,
         "mese_composite": raw_judge["mese"]["composite"],
         "structure_score": structure.get("score", 0),
+        "step_distinctness": step_distinctness["score"],
         "roadmap_readiness": readiness["status"],
         "query_intent": query_intent.get("intent", ""),
     }, ensure_ascii=False, indent=2))

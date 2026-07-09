@@ -4,6 +4,7 @@ import os
 import json
 import csv
 import html as html_lib
+import math
 from datetime import datetime
 
 from evaluation.config import config
@@ -28,7 +29,7 @@ def save_human_review_csv(judge_results: dict, path: str):
             "Pasos generados (en orden)",
             "Pasos esperados",
             "Readiness", "Readiness reason",
-            "Score Resumen", "Grounding", "Completeness", "Logical Order", "Actionability",
+            "Score Resumen", "Grounding", "Completeness", "Logical Order", "Actionability", "Step Distinctness",
             "Score Secuencia", "Secuencia válida (IA)",
             "Pasos fuera de orden (IA)", "Sugerencia de reorden (IA)",
             # columnas para el humano
@@ -39,6 +40,7 @@ def save_human_review_csv(judge_results: dict, path: str):
         for i, s in enumerate(judge_results.get("per_sample", []), 1):
             seq     = s["sequence_eval"]
             mese    = s["mese"]
+            step_distinctness = s.get("step_distinctness", {})
             readiness = s.get("roadmap_readiness", {})
             steps   = "\n".join([f"{j+1}. {p}" for j, p in enumerate(s.get("steps", []))])
             exp     = "\n".join([f"{j+1}. {p}" for j, p in enumerate(s.get("expected_steps", []))])
@@ -60,6 +62,7 @@ def save_human_review_csv(judge_results: dict, path: str):
                 round(mese["exhaustiveness"], 2),
                 round(mese["sequence"], 2),
                 round(mese["experience"], 2),
+                round(step_distinctness.get("score", 0), 2),
                 round(seq["score"], 2),
                 "Sí" if seq["is_valid"] else "No",
                 oor or "—",
@@ -76,15 +79,54 @@ def _score_color(score: float) -> str:
     if score >= 5:  return "#fa8c16"
     return "#f5222d"
 
+def _ragas_score_cell(value) -> str:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return '<td style="text-align:center;color:#999">N/A</td>'
+    if math.isnan(numeric):
+        return '<td style="text-align:center;color:#999">N/A</td>'
+    score = round(max(0.0, min(1.0, numeric)) * 10, 2)
+    return f'<td style="text-align:center;color:{_score_color(score)}">{score:.2f}/10</td>'
+
 def _badge(text: str, color: str) -> str:
     return f'<span style="background:{color};color:#fff;padding:2px 8px;border-radius:12px;font-size:12px">{text}</span>'
 
 def _readiness_color(status: str) -> str:
-    if status == "READY":
+    if status in ("READY", "Ready", "Approved"):
         return "#52c41a"
-    if status == "NEEDS_REVIEW":
+    if status in ("NEEDS_REVIEW", "Needs Review"):
         return "#fa8c16"
     return "#f5222d"
+
+def _readiness_label(status: str) -> str:
+    labels = {
+        "READY": "Ready",
+        "NEEDS_REVIEW": "Needs Review",
+        "FAIL": "Failed",
+    }
+    return labels.get(status, status or "N/A")
+
+def _summary_readiness_status(judge_results: dict, readiness_agg: dict) -> str:
+    samples = judge_results.get("per_sample", []) if judge_results else []
+    statuses = [
+        s.get("roadmap_readiness", {}).get("status")
+        for s in samples
+        if s.get("roadmap_readiness", {}).get("status")
+    ]
+    if statuses:
+        if any(status == "FAIL" for status in statuses):
+            return "FAIL"
+        if any(status == "NEEDS_REVIEW" for status in statuses):
+            return "NEEDS_REVIEW"
+        return "READY"
+    if readiness_agg.get("fail_rate", 0) > 0:
+        return "FAIL"
+    if readiness_agg.get("needs_review_rate", 0) > 0:
+        return "NEEDS_REVIEW"
+    if readiness_agg.get("ready_rate", 0) > 0:
+        return "READY"
+    return "N/A"
 
 def _bar(score: float, max_score: float = 10) -> str:
     pct = max(0, min(100, (score / max_score) * 100))
@@ -92,6 +134,81 @@ def _bar(score: float, max_score: float = 10) -> str:
     return f'''<div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%">
       <div style="background:{color};width:{pct:.0f}%;height:10px;border-radius:4px"></div>
     </div>'''
+
+
+
+def _overlap_details_html(step_overlap: dict) -> str:
+    pairs = step_overlap.get("overlapping_pairs", []) or []
+    if not pairs:
+        if step_overlap.get("evaluated"):
+            return "<li style='color:#52c41a'>No overlapping weak steps detected</li>"
+        return "<li style='color:#52c41a'>No weak steps detected; overlap analysis was not required</li>"
+    return "".join(
+        "<li>"
+        f"Steps {', '.join(str(s) for s in p.get('steps', []))}: "
+        f"<strong>{html_lib.escape(str(p.get('overlap_type', 'overlap')))}</strong> "
+        f"({html_lib.escape(str(p.get('severity', 'medium')))}). "
+        f"{html_lib.escape(str(p.get('explanation', '')))} "
+        f"<em>{html_lib.escape(str(p.get('recommendation', '')))}</em>"
+        "</li>"
+        for p in pairs
+    )
+
+
+def _readiness_counts(judge_results: dict) -> dict:
+    samples = judge_results.get("per_sample", []) if judge_results else []
+    counts = {"READY": 0, "NEEDS_REVIEW": 0, "FAIL": 0}
+    for sample in samples:
+        status = sample.get("roadmap_readiness", {}).get("status", "N/A")
+        if status in counts:
+            counts[status] += 1
+    return counts
+
+
+def _weakest_metric(mese: dict, step_distinctness: dict, struct: dict) -> tuple[str, float]:
+    metrics = {
+        "Grounding": float(mese.get("mapping", 0)),
+        "Completeness": float(mese.get("exhaustiveness", 0)),
+        "Logical Order": float(mese.get("sequence", 0)),
+        "Actionability": float(mese.get("experience", 0)),
+        "Step Distinctness": float(step_distinctness.get("score", 0)),
+        "Structure": float(struct.get("score", 0)),
+    }
+    return min(metrics.items(), key=lambda item: item[1])
+
+
+def _main_issue(mese: dict, step_distinctness: dict, struct: dict, readiness: dict) -> str:
+    reason = readiness.get("reason", "")
+    if reason:
+        return reason
+    metric, score = _weakest_metric(mese, step_distinctness, struct)
+    if score >= 7:
+        return "No major issue detected"
+    return f"{metric} needs review"
+
+
+def _batch_issues_html(mese: dict, step_distinctness: dict, struct: dict) -> str:
+    checks = [
+        ("Grounding", float(mese.get("mapping", 0)), "weak support against retrieved context", "mostly supported, worth checking evidence"),
+        ("Completeness", float(mese.get("exhaustiveness", 0)), "missing important expected scope", "covers the core topic but misses useful depth"),
+        ("Actionability", float(mese.get("experience", 0)), "steps are too abstract to execute", "steps need clearer actions or deliverables"),
+        ("Step Distinctness", float(step_distinctness.get("score", 0)), "steps do not contribute distinct learning value", "some steps need clearer unique contribution"),
+        ("Structure", float(struct.get("score", 0)), "structural validation failed", "structure needs review"),
+    ]
+    issues = []
+    for label, score, severe_text, review_text in checks:
+        if score < 5:
+            issues.append((label, score, severe_text))
+        elif score < 7:
+            issues.append((label, score, review_text))
+
+    if not issues:
+        return '<span style="color:#52c41a">All key dimensions are above threshold.</span>'
+
+    return "<ul class='issue-list'>" + "".join(
+        f'<li><strong style="color:{_score_color(score)}">{html_lib.escape(label)}:</strong> {html_lib.escape(text)}</li>'
+        for label, score, text in issues
+    ) + "</ul>"
 
 
 def _query_intent(sample: dict) -> dict:
@@ -113,13 +230,14 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
     ragas_agg  = ragas_results.get("aggregated", {})  if ragas_results  else {}
     judge_agg  = judge_results.get("aggregated", {})  if judge_results  else {}
     corpus_agg = corpus_results.get("aggregated", {}) if corpus_results else {}
-    pass_rate  = judge_results.get("pass_rate", 0)    if judge_results  else 0
-    mese_rate  = judge_results.get("mese_pass_rate", 0) if judge_results else 0
     readiness_agg = judge_agg.get("readiness", {}) if judge_agg else {}
     roadmap_agg = judge_agg.get("roadmap", {}) if judge_agg else {}
     grounding_agg = judge_agg.get("grounding", {}) if judge_agg else {}
-    ready_rate = readiness_agg.get("ready_rate", judge_results.get("readiness_ready_rate", 0) if judge_results else 0)
-    fail_rate = readiness_agg.get("fail_rate", judge_results.get("readiness_fail_rate", 0) if judge_results else 0)
+    readiness_status = _summary_readiness_status(judge_results or {}, readiness_agg)
+    readiness_label = _readiness_label(readiness_status)
+    readiness_color = _readiness_color(readiness_status)
+    samples = (judge_results or {}).get("per_sample", [])
+    readiness_counts = _readiness_counts(judge_results or {})
 
     # tarjetas resumen
     summary_cards = ""
@@ -130,17 +248,39 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
             ("Completeness",    roadmap_agg.get("completeness", 0)),
             ("Logical Order",   roadmap_agg.get("logical_order", 0)),
             ("Actionability",   roadmap_agg.get("actionability", 0)),
+            ("Step Distinctness", roadmap_agg.get("step_distinctness", 0)),
             ("Structure",       judge_agg.get("structure", {}).get("mean_score", 0)),
         ]
-    if corpus_results and "overall_corpus_score" in corpus_results:
-        all_cards.append(("Corpus",  corpus_results["overall_corpus_score"]))
-    if judge_agg:
+    if judge_agg and len(samples) > 1:
+        total_samples = max(1, len(samples))
+        ready_pct = readiness_counts["READY"] / total_samples * 100
+        review_pct = readiness_counts["NEEDS_REVIEW"] / total_samples * 100
+        fail_pct = readiness_counts["FAIL"] / total_samples * 100
+        summary_cards += f'''
+        <div style="background:#fff;border-radius:8px;padding:20px;
+                    box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:240px">
+          <div style="font-size:18px;font-weight:700;color:#333">Roadmap Status</div>
+          <div style="font-size:13px;color:#666;margin-top:4px">{total_samples} evaluated roadmaps</div>
+          <div style="display:flex;height:10px;border-radius:4px;overflow:hidden;background:#f0f0f0;margin-top:10px">
+            <div title="Ready" style="background:#52c41a;width:{ready_pct:.0f}%"></div>
+            <div title="Needs Review" style="background:#fa8c16;width:{review_pct:.0f}%"></div>
+            <div title="Failed" style="background:#f5222d;width:{fail_pct:.0f}%"></div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:12px">
+            <span style="color:#52c41a">Ready: {readiness_counts["READY"]}</span>
+            <span style="color:#fa8c16">Review: {readiness_counts["NEEDS_REVIEW"]}</span>
+            <span style="color:#f5222d">Failed: {readiness_counts["FAIL"]}</span>
+          </div>
+        </div>'''
+    elif judge_agg:
         summary_cards += f'''
         <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;
                     box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:170px">
-          <div style="font-size:32px;font-weight:700;color:{'#52c41a' if ready_rate >= 0.7 else '#fa8c16' if ready_rate > 0 else '#f5222d'}">{ready_rate:.0%}</div>
-          <div style="font-size:13px;color:#666;margin-top:4px">Roadmaps Ready</div>
-          {_bar(ready_rate * 10)}
+          <div style="font-size:28px;font-weight:700;color:{readiness_color}">{readiness_label}</div>
+          <div style="font-size:13px;color:#666;margin-top:4px">Roadmap Status</div>
+          <div style="background:#f0f0f0;border-radius:4px;height:10px;width:100%;margin-top:8px">
+            <div style="background:{readiness_color};width:100%;height:10px;border-radius:4px"></div>
+          </div>
         </div>'''
     for label, val in all_cards:
         color = _score_color(val)
@@ -159,30 +299,33 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
         ragas_rows += f'''<tr>
           <td style="max-width:250px;word-break:break-word">{s["question"]}</td>
           <td>{_badge(s.get("category",""), "#1890ff")}</td>
-          <td style="text-align:center;color:{_score_color(sc.get("faithfulness",0))}">
-            {sc.get("faithfulness",0):.2f}</td>
-          <td style="text-align:center;color:{_score_color(sc.get("answer_relevancy",0))}">
-            {sc.get("answer_relevancy",0):.2f}</td>
-          <td style="text-align:center;color:{_score_color(sc.get("context_precision",0))}">
-            {sc.get("context_precision",0):.2f}</td>
-          <td style="text-align:center;color:{_score_color(sc.get("context_recall",0))}">
-            {sc.get("context_recall",0):.2f}</td>
+          {_ragas_score_cell(sc.get("faithfulness"))}
+          {_ragas_score_cell(sc.get("answer_relevancy"))}
+          {_ragas_score_cell(sc.get("context_precision"))}
+          {_ragas_score_cell(sc.get("context_recall"))}
         </tr>'''
 
     # tabla humana (LLM Judge + revision)
+    batch_rows = ""
     human_rows = ""
     for i, s in enumerate((judge_results or {}).get("per_sample", []), 1):
         seq    = s["sequence_eval"]
         mese   = s["mese"]
+        step_distinctness = s.get("step_distinctness", {})
+        step_overlap = s.get("step_overlap", {})
+        overlap_evaluated = bool(step_overlap.get("evaluated"))
+        overlap_issue_count = int(step_overlap.get("issue_count", 0))
+        overlap_label = "Evaluated" if overlap_evaluated else "Not required"
+        overlap_color = _score_color(10 if not overlap_evaluated and overlap_issue_count == 0 else max(0, 10 - overlap_issue_count * 2))
         readiness = s.get("roadmap_readiness", {})
         struct = s.get("structure", {})
         steps  = "".join(f"<li>{html_lib.escape(str(p))}</li>" for p in s.get("steps", []))
         exp    = "".join(f"<li>{html_lib.escape(str(p))}</li>" for p in s.get("expected_steps", []))
         oor    = seq.get("out_of_order_steps", [])
-        oor_html = "".join(f'<li style="color:#f5222d">{p}</li>' for p in oor) if oor else "<li style='color:#52c41a'>Ninguno</li>"
+        oor_html = "".join(f'<li style="color:#f5222d">{p}</li>' for p in oor) if oor else "<li style='color:#52c41a'>None</li>"
         verdict_badge  = _badge(s["verdict"],      "#52c41a" if s["verdict"]=="PASS"      else "#f5222d")
         mese_badge     = _badge(s["mese_verdict"],  "#52c41a" if s["mese_verdict"]=="PASS"  else "#f5222d")
-        seq_badge      = _badge("Válida" if seq["is_valid"] else "Inválida",
+        seq_badge      = _badge("Valid" if seq["is_valid"] else "Invalid",
                                 "#52c41a" if seq["is_valid"] else "#f5222d")
         struct_verdict = struct.get("verdict", "N/A")
         struct_badge   = _badge(struct_verdict, "#52c41a" if struct_verdict=="PASS" else "#f5222d")
@@ -206,7 +349,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
         rewrite_strategy_html = html_lib.escape(s.get("rewrite_strategy", s.get("judge_context_strategy", "")))
         refined_block = (
             f'''<details style="margin-top:8px">
-              <summary style="cursor:pointer;color:#1890ff;font-size:12px">Ver prompt mejorado</summary>
+              <summary style="cursor:pointer;color:#1890ff;font-size:12px">View refined prompt</summary>
               <div style="font-size:12px;color:#555;margin-top:4px;line-height:1.35">{refined_html}</div>
             </details>'''
             if refined_html else
@@ -214,16 +357,35 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
         )
         intent_goal_block = (
             f'''<details style="margin-top:4px">
-              <summary style="cursor:pointer;color:#666;font-size:12px">Ver objetivo/intención</summary>
+              <summary style="cursor:pointer;color:#666;font-size:12px">View goal/intent</summary>
               <div style="font-size:12px;color:#555;margin-top:4px;line-height:1.35">{intent_goal_html}</div>
             </details>'''
             if intent_goal_html else ""
         )
 
+        issues_html = _batch_issues_html(mese, step_distinctness, struct)
+
+        batch_rows += f'''
+        <tr>
+          <td style="text-align:center;font-weight:bold">{i}</td>
+          <td style="max-width:280px">
+            <strong>{question_html}</strong><br>
+            {_badge(s.get("category",""), "#722ed1")}
+            <small style="color:#666"> {intent_html or "N/A"}</small>
+          </td>
+          <td>{readiness_badge}</td>
+          <td style="color:{_score_color(mese["mapping"])}">{mese["mapping"]:.1f}</td>
+          <td style="color:{_score_color(mese["exhaustiveness"])}">{mese["exhaustiveness"]:.1f}</td>
+          <td style="color:{_score_color(mese["experience"])}">{mese["experience"]:.1f}</td>
+          <td style="color:{_score_color(step_distinctness.get("score", 0))}">{step_distinctness.get("score", 0):.1f}</td>
+          <td style="color:{_score_color(struct.get("score", 0))}">{struct.get("score", 0):.1f}</td>
+          <td>{issues_html}</td>
+        </tr>'''
+
         human_rows += f'''
         <tr id="row-{i}">
           <td style="text-align:center;font-weight:bold">{i}</td>
-          <td style="max-width:200px">
+          <td class="question-cell">
             <strong>{question_html}</strong><br>
             {_badge(s.get("category",""), "#722ed1")}<br>
             <small style="color:#666">intent={intent_html or "N/A"}</small><br>
@@ -234,76 +396,51 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
           </td>
           <td class="steps-cell">
             <details open>
-              <summary style="cursor:pointer;color:#1890ff">Ver pasos generados ({len(s.get("steps",[]))})</summary>
+              <summary style="cursor:pointer;color:#1890ff">View generated steps ({len(s.get("steps",[]))})</summary>
               <ol class="steps-list">{steps}</ol>
             </details>
             <details open style="margin-top:8px">
-              <summary style="cursor:pointer;color:#52c41a">Ver pasos esperados</summary>
+              <summary style="cursor:pointer;color:#52c41a">View expected steps</summary>
               <ol class="steps-list">{exp}</ol>
             </details>
           </td>
-          <td>
-            <strong>Secuencia</strong> {seq_badge}<br>
+          <td class="sequence-cell">
+            <strong>Sequence</strong> {seq_badge}<br>
             <small>{_bar(seq["score"])} {seq["score"]:.1f}/10</small><br>
             <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Pasos fuera de orden</summary>
+              <summary style="cursor:pointer;font-size:12px">Out-of-order steps</summary>
               <ul style="font-size:12px;padding-left:16px;margin:4px 0">{oor_html}</ul>
               <div style="font-size:12px;color:#666;margin-top:4px">
-                <strong>Sugerencia:</strong> {seq.get("suggested_fix","—")}
+                <strong>Suggestion:</strong> {seq.get("suggested_fix","—")}
               </div>
             </details>
           </td>
-          <td>
-            <table style="font-size:12px;width:100%">
-              <tr><td>Grounding</td><td style="color:{_score_color(mese["mapping"])}">{mese["mapping"]:.1f}</td></tr>
-              <tr><td>Completeness</td><td style="color:{_score_color(mese["exhaustiveness"])}">{mese["exhaustiveness"]:.1f}</td></tr>
-              <tr><td>Logical Order</td><td style="color:{_score_color(mese["sequence"])}">{mese["sequence"]:.1f}</td></tr>
-              <tr><td>Actionability</td><td style="color:{_score_color(mese["experience"])}">{mese["experience"]:.1f}</td></tr>
-              <tr style="font-weight:bold;border-top:1px solid #eee">
-                <td>Summary</td>
-                <td style="color:{_score_color(mese["composite"])}">{mese["composite"]:.1f}</td>
-              </tr>
-            </table>
-            <small style="color:#999">Grounding source: {grounding_source}</small>
-          </td>
-          <td>
-            {readiness_badge}<br>
-            <small style="color:#666">{readiness_reason_html}</small>
-          </td>
-          <td>
+          <td class="structure-cell">
             {struct_badge} {struct.get("score", 0):.1f}/10<br>
             <small style="color:#666">{struct.get("passed",0)}/{struct.get("total_checks",0)} checks</small>
             <details style="margin-top:4px">
-              <summary style="cursor:pointer;font-size:12px">Ver violaciones</summary>
+              <summary style="cursor:pointer;font-size:12px">View violations</summary>
               <ul style="padding-left:14px;margin:4px 0">{struct_violations_html}</ul>
             </details>
           </td>
-          <td>
-            <strong style="color:{_score_color(s["overall_score"])}">{s["overall_score"]:.1f}/10</strong>
-            {verdict_badge}<br>
-            <small style="color:#666">{s.get("classic",{}).get("summary","")[:120]}...</small>
+          <td class="overlap-cell">
+            <strong style="color:{overlap_color}">{overlap_label}</strong><br>
+            <small style="color:#666;display:block">
+              Evaluated: {"yes" if overlap_evaluated else "no"}<br>
+              Trigger: {html_lib.escape(str(step_overlap.get("trigger", "no_weak_steps")))}<br>
+              Issues: {overlap_issue_count}
+            </small>
+            <details style="margin-top:8px">
+              <summary style="cursor:pointer;font-size:12px">Overlapping pairs</summary>
+              <ul style="font-size:12px;padding-left:16px;margin:4px 0">{_overlap_details_html(step_overlap)}</ul>
+            </details>
           </td>
-          <td style="background:#fffbe6">
-            <label style="font-size:12px;display:block">Nota Secuencia (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hs-{i}" placeholder="—">
-            <label style="font-size:12px;display:block">Nota General (0-10):</label>
-            <input type="number" min="0" max="10" step="0.5"
-                   style="width:60px;padding:2px 4px;margin-bottom:4px"
-                   id="hg-{i}" placeholder="—">
-            <label style="font-size:12px;display:block">¿Aprobar?</label>
-            <select id="ha-{i}" style="padding:2px 4px;margin-bottom:4px">
-              <option value="">—</option>
-              <option value="Si">Sí</option>
-              <option value="No">No</option>
-            </select>
-            <label style="font-size:12px;display:block">Comentarios:</label>
-            <textarea id="hc-{i}" rows="2"
-                      style="width:100%;font-size:12px;resize:vertical"
-                      placeholder="Observaciones..."></textarea>
+          <td class="readiness-cell">
+            {readiness_badge}<br>
+            <small style="color:#666">{readiness_reason_html}</small>
           </td>
         </tr>'''
+
 
     # seccion Corpus Judge
     corpus_section = ""
@@ -319,7 +456,7 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
             f'<tr><td style="font-size:12px;max-width:300px">{p["preview"]}</td>'
             f'<td style="font-size:12px;color:#f5222d">{p["problem"]}</td></tr>'
             for p in prob
-        ) or '<tr><td colspan="2" style="color:#52c41a;font-size:12px">Sin chunks problemáticos</td></tr>'
+        ) or '<tr><td colspan="2" style="color:#52c41a;font-size:12px">No problematic chunks</td></tr>'
 
         chunk_rows = "".join(
             f'<tr>'
@@ -335,11 +472,11 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
         )
 
         corpus_section = f'''
-<h2>Corpus Judge — Calidad de la Base de Conocimiento</h2>
+<h2>Corpus Judge — Knowledge Base Quality</h2>
 <p style="font-size:13px;color:#888;margin-bottom:12px">
-  Evaluación de los {corpus_results["n_chunks_total"]} chunks en ChromaDB
-  (se evaluaron {corpus_results["n_chunks_evaluated"]} con LLM).
-  Inspirado en Rothman (2024): cosine similarity semántica + juez LLM de coherencia y utilidad.
+  Evaluation of {corpus_results["n_chunks_total"]} chunks in ChromaDB
+  ({corpus_results["n_chunks_evaluated"]} evaluated with an LLM).
+  Inspired by Rothman (2024): semantic cosine similarity + LLM judge for coherence and usefulness.
 </p>
 
 <div class="cards" style="margin-bottom:16px">
@@ -350,38 +487,38 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
   </div>
   <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:140px">
     <div style="font-size:32px;font-weight:700;color:{_score_color(ca.get("avg_quality",0))}">{ca.get("avg_quality",0):.1f}</div>
-    <div style="font-size:13px;color:#666;margin-top:4px">Calidad Media</div>
+    <div style="font-size:13px;color:#666;margin-top:4px">Average Quality</div>
     {_bar(ca.get("avg_quality",0))}
   </div>
   <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:140px">
     <div style="font-size:32px;font-weight:700;color:{'#52c41a' if (sd.get('diversity_score') or 0)>0.5 else '#fa8c16'}">{(sd.get("diversity_score") or 0):.2f}</div>
-    <div style="font-size:13px;color:#666;margin-top:4px">Diversidad Semántica</div>
+    <div style="font-size:13px;color:#666;margin-top:4px">Semantic Diversity</div>
     {_bar((sd.get("diversity_score") or 0)*10)}
   </div>
   <div style="background:#fff;border-radius:8px;padding:20px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.1);min-width:140px">
     <div style="font-size:32px;font-weight:700;color:{'#52c41a' if sd.get('redundant_pairs',0)==0 else '#f5222d'}">{sd.get("redundant_pairs",0)}</div>
-    <div style="font-size:13px;color:#666;margin-top:4px">Pares Redundantes</div>
+    <div style="font-size:13px;color:#666;margin-top:4px">Redundant Pairs</div>
   </div>
 </div>
 
 <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
   <div style="background:#fff;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.08);flex:1;min-width:200px">
-    <strong>Métricas Agregadas</strong>
+    <strong>Aggregated Metrics</strong>
     <table style="margin-top:8px;font-size:13px;width:100%;box-shadow:none">
-      <tr><td>Coherencia media</td><td style="text-align:right;color:{_score_color(ca.get("avg_coherencia",0))}">{ca.get("avg_coherencia",0):.2f}/10</td></tr>
-      <tr><td>Densidad técnica</td><td style="text-align:right;color:{_score_color(ca.get("avg_densidad_tecnica",0))}">{ca.get("avg_densidad_tecnica",0):.2f}/10</td></tr>
-      <tr><td>Utilidad RAG</td><td style="text-align:right;color:{_score_color(ca.get("avg_utilidad_rag",0))}">{ca.get("avg_utilidad_rag",0):.2f}/10</td></tr>
-      <tr><td>Longitud media</td><td style="text-align:right">{ca.get("avg_chunk_length",0)} chars</td></tr>
-      <tr><td>Chunks con issues</td><td style="text-align:right;color:{'#f5222d' if ca.get('chunks_with_issues',0)>0 else '#52c41a'}">{ca.get("chunks_with_issues",0)}</td></tr>
+      <tr><td>Average coherence</td><td style="text-align:right;color:{_score_color(ca.get("avg_coherencia",0))}">{ca.get("avg_coherencia",0):.2f}/10</td></tr>
+      <tr><td>Technical density</td><td style="text-align:right;color:{_score_color(ca.get("avg_densidad_tecnica",0))}">{ca.get("avg_densidad_tecnica",0):.2f}/10</td></tr>
+      <tr><td>RAG usefulness</td><td style="text-align:right;color:{_score_color(ca.get("avg_utilidad_rag",0))}">{ca.get("avg_utilidad_rag",0):.2f}/10</td></tr>
+      <tr><td>Average length</td><td style="text-align:right">{ca.get("avg_chunk_length",0)} chars</td></tr>
+      <tr><td>Chunks with issues</td><td style="text-align:right;color:{'#f5222d' if ca.get('chunks_with_issues',0)>0 else '#52c41a'}">{ca.get("chunks_with_issues",0)}</td></tr>
     </table>
   </div>
   <div style="background:#fff;border-radius:8px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.08);flex:1;min-width:200px">
-    <strong>Cobertura Temática</strong>
+    <strong>Topic Coverage</strong>
     <table style="margin-top:8px;font-size:13px;width:100%;box-shadow:none">
-      <tr><td>Amplitud</td><td style="text-align:right;color:{_score_color(cv.get("amplitud",5))}">{cv.get("amplitud","N/A")}/10</td></tr>
-      <tr><td>Profundidad</td><td style="text-align:right;color:{_score_color(cv.get("profundidad",5))}">{cv.get("profundidad","N/A")}/10</td></tr>
-      <tr><td>Coherencia temática</td><td style="text-align:right;color:{_score_color(cv.get("coherencia_tematica",5))}">{cv.get("coherencia_tematica","N/A")}/10</td></tr>
-      <tr><td>Temas únicos</td><td style="text-align:right">{cv.get("temas_unicos_estimados","N/A")}</td></tr>
+      <tr><td>Breadth</td><td style="text-align:right;color:{_score_color(cv.get("amplitud",5))}">{cv.get("amplitud","N/A")}/10</td></tr>
+      <tr><td>Depth</td><td style="text-align:right;color:{_score_color(cv.get("profundidad",5))}">{cv.get("profundidad","N/A")}/10</td></tr>
+      <tr><td>Topic coherence</td><td style="text-align:right;color:{_score_color(cv.get("coherencia_tematica",5))}">{cv.get("coherencia_tematica","N/A")}/10</td></tr>
+      <tr><td>Estimated unique topics</td><td style="text-align:right">{cv.get("temas_unicos_estimados","N/A")}</td></tr>
     </table>
     <div style="font-size:12px;color:#666;margin-top:8px;font-style:italic">
       {cv.get("observacion","")}
@@ -390,18 +527,18 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
 </div>
 
 <details>
-  <summary style="cursor:pointer;color:#1890ff;margin-bottom:8px">Ver evaluación por chunk</summary>
+  <summary style="cursor:pointer;color:#1890ff;margin-bottom:8px">View per-chunk evaluation</summary>
   <div style="overflow-x:auto">
   <table>
     <thead><tr>
-      <th>Chunk (preview)</th><th>Coherencia</th><th>Densidad</th><th>Utilidad</th><th>Avg</th><th>Tema</th>
+      <th>Chunk (preview)</th><th>Coherence</th><th>Density</th><th>Usefulness</th><th>Avg</th><th>Topic</th>
     </tr></thead>
     <tbody>{chunk_rows}</tbody>
   </table>
   </div>
 </details>
 
-{"<h3 style='color:#f5222d;margin-top:16px'>Chunks Problemáticos</h3><table><thead><tr><th>Preview</th><th>Problema detectado</th></tr></thead><tbody>" + prob_rows + "</tbody></table>" if prob else ""}
+{"<h3 style='color:#f5222d;margin-top:16px'>Problematic Chunks</h3><table><thead><tr><th>Preview</th><th>Detected problem</th></tr></thead><tbody>" + prob_rows + "</tbody></table>" if prob else ""}
 '''
 
     html = f'''<!DOCTYPE html>
@@ -409,7 +546,114 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NotionMap — Reporte de Evaluación</title>
+<title>NotionMap — Evaluation Report</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          background: #f5f5f5; color: #333; padding: 24px; }}
+  h1 {{ font-size: 24px; margin-bottom: 4px; }}
+  h2 {{ font-size: 18px; margin: 24px 0 12px; color: #444; border-bottom: 2px solid #e8e8e8;
+        padding-bottom: 6px; }}
+  h3 {{ font-size: 15px; margin: 16px 0 8px; color: #555; }}
+  .meta {{ color: #888; font-size: 13px; margin-bottom: 24px; }}
+  .cards {{ display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }}
+  table {{ width: 100%; border-collapse: collapse; background: #fff;
+           border-radius: 8px; overflow: hidden;
+           box-shadow: 0 2px 8px rgba(0,0,0,.08); margin-bottom: 24px; }}
+  th {{ background: #fafafa; padding: 10px 12px; text-align: left;
+        font-size: 13px; border-bottom: 2px solid #e8e8e8; }}
+  td {{ padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0;
+        vertical-align: top; }}
+  tr:hover td {{ background: #fafafa; }}
+  .question-cell {{ min-width: 170px; max-width: 230px; }}
+  .steps-cell {{ min-width: 260px; max-width: 340px; }}
+  .sequence-cell {{ min-width: 170px; max-width: 240px; }}
+  .structure-cell {{ min-width: 200px; max-width: 280px; }}
+  .overlap-cell {{ min-width: 170px; max-width: 240px; }}
+  .readiness-cell {{ min-width: 160px; max-width: 220px; }}
+  .steps-list {{ padding-left: 18px; margin: 6px 0 0; line-height: 1.35; }}
+  .steps-list li {{ margin-bottom: 4px; }}
+  .issue-list {{ padding-left: 16px; margin: 0; line-height: 1.35; }}
+  .issue-list li {{ margin-bottom: 4px; }}
+  .mini-table {{ font-size:12px; width:100%; box-shadow:none; margin:6px 0; border-radius:4px; }}
+  .mini-table td {{ padding:5px 6px; }}
+  details summary::-webkit-details-marker {{ display:none; }}
+  .export-btn {{ background: #1890ff; color: #fff; border: none; padding: 8px 20px;
+                 border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 16px; }}
+  .export-btn:hover {{ background: #096dd9; }}
+</style>
+</head>
+<body>
+
+<h1>NotionMap — Evaluation Report</h1>
+<div class="meta">Generated: {now} &nbsp;|&nbsp; Model: {active_model_name()}</div>
+
+<!-- Tarjetas resumen -->
+<h2>General Summary</h2>
+<div class="cards">{summary_cards}</div>
+
+<h2>Batch Overview</h2>
+<p style="font-size:13px;color:#888;margin-bottom:12px">
+  Comparative view to quickly identify which questions are ready, which need review, and which dimensions need attention per case.
+</p>
+<div style="overflow-x:auto">
+<table class="batch-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Question</th>
+      <th>Status</th>
+      <th>Grounding</th>
+      <th>Completeness</th>
+      <th>Actionability</th>
+      <th>Step Distinctness</th>
+      <th>Structure</th>
+      <th>Quality Signals</th>
+    </tr>
+  </thead>
+  <tbody>{batch_rows}</tbody>
+</table>
+</div>
+
+<!-- LLM Judge + Tabla Humana -->
+<h2>Case Details</h2>
+<p style="font-size:13px;color:#888;margin-bottom:12px">
+  Per-question drill-down with generated output, sequence analysis, and technical diagnostics needed to explain each case.
+</p>
+<h3>Roadmap Output + Evaluation Insights</h3>
+<div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Question</th>
+      <th>Steps / Expected Sequence</th>
+      <th>Sequence Analysis</th>
+      <th>Structure</th>
+      <th>Step Overlap</th>
+      <th>Readiness</th>
+    </tr>
+  </thead>
+  <tbody>{human_rows}</tbody>
+</table>
+</div>
+
+</body>
+</html>'''
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"  HTML guardado: {path}")
+
+    if ragas_rows or corpus_section:
+        base, ext = os.path.splitext(path)
+        technical_path = f"{base}_ragas_corpus{ext or '.html'}"
+        technical_html = f'''<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NotionMap — RAGAS + Corpus Diagnostics</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -419,9 +663,6 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
         padding-bottom: 6px; }}
   .meta {{ color: #888; font-size: 13px; margin-bottom: 24px; }}
   .cards {{ display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }}
-  .rates {{ display: flex; gap: 16px; margin-bottom: 24px; }}
-  .rate-box {{ background:#fff; border-radius:8px; padding:16px 24px;
-               box-shadow:0 2px 8px rgba(0,0,0,.08); }}
   table {{ width: 100%; border-collapse: collapse; background: #fff;
            border-radius: 8px; overflow: hidden;
            box-shadow: 0 2px 8px rgba(0,0,0,.08); margin-bottom: 24px; }}
@@ -430,94 +671,19 @@ def save_html(ragas_results: dict, judge_results: dict, path: str,
   td {{ padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #f0f0f0;
         vertical-align: top; }}
   tr:hover td {{ background: #fafafa; }}
-  .steps-cell {{ min-width: 320px; max-width: 460px; }}
-  .steps-list {{ padding-left: 18px; margin: 6px 0 0; line-height: 1.35; }}
-  .steps-list li {{ margin-bottom: 4px; }}
   details summary::-webkit-details-marker {{ display:none; }}
-  .export-btn {{ background: #1890ff; color: #fff; border: none; padding: 8px 20px;
-                 border-radius: 6px; cursor: pointer; font-size: 14px; margin-top: 16px; }}
-  .export-btn:hover {{ background: #096dd9; }}
 </style>
 </head>
 <body>
-
-<h1>NotionMap — Reporte de Evaluación</h1>
-<div class="meta">Generado: {now} &nbsp;|&nbsp; Modelo: {active_model_name()}</div>
-
-<!-- Tarjetas resumen -->
-<h2>Resumen General</h2>
-<div class="cards">{summary_cards}</div>
-
-<div class="rates">
-  <div class="rate-box">
-    <div style="font-size:22px;font-weight:700;color:{'#52c41a' if ready_rate>=0.7 else '#fa8c16' if ready_rate>0 else '#f5222d'}">
-      {ready_rate:.0%}</div>
-    <div style="font-size:13px;color:#666">Ready Rate</div>
-  </div>
-  <div class="rate-box">
-    <div style="font-size:22px;font-weight:700;color:{'#52c41a' if fail_rate==0 else '#f5222d'}">
-      {fail_rate:.0%}</div>
-    <div style="font-size:13px;color:#666">Fail Rate</div>
-  </div>
-  <div class="rate-box">
-    <div style="font-size:22px;font-weight:700;color:{'#52c41a' if judge_agg.get('sequence',{}).get('valid_pct',0)>=0.7 else '#f5222d'}">
-      {judge_agg.get("sequence",{}).get("valid_pct",0):.0%}</div>
-    <div style="font-size:13px;color:#666">Secuencias Válidas</div>
-  </div>
-</div>
-
-<!-- RAGAS -->
-{"<h2>RAGAS — Métricas Automáticas</h2><table><thead><tr><th>Pregunta</th><th>Categoría</th><th>Faithfulness</th><th>Relevancy</th><th>Precision</th><th>Recall</th></tr></thead><tbody>" + ragas_rows + "</tbody></table>" if ragas_rows else ""}
-
-<!-- LLM Judge + Tabla Humana -->
-<h2>Stakeholder Insights + Developer Diagnostics</h2>
+<h1>NotionMap — RAGAS + Corpus Diagnostics</h1>
+<div class="meta">Generated: {now} &nbsp;|&nbsp; Model: {active_model_name()}</div>
 <p style="font-size:13px;color:#888;margin-bottom:12px">
-  La vista ejecutiva prioriza readiness y dimensiones claras. Los detalles técnicos quedan disponibles para debugging.
+  Separate technical report for automatic RAGAS metrics and corpus diagnostics.
 </p>
-<div style="overflow-x:auto">
-<table>
-  <thead>
-    <tr>
-      <th>#</th>
-      <th>Pregunta</th>
-      <th>Pasos / Secuencia esperada</th>
-      <th>Análisis de Secuencia</th>
-      <th>Roadmap Quality</th>
-      <th>Readiness</th>
-      <th>Estructura</th>
-      <th>Score General</th>
-      <th style="background:#fffbe6">Revisión Humana</th>
-    </tr>
-  </thead>
-  <tbody>{human_rows}</tbody>
-</table>
-</div>
-
-<button class="export-btn" onclick="exportCSV()">Exportar revisión humana (CSV)</button>
-
+{"<h2>RAGAS — Automatic Metrics</h2><table><thead><tr><th>Question</th><th>Category</th><th>Faithfulness</th><th>Relevancy</th><th>Precision</th><th>Recall</th></tr></thead><tbody>" + ragas_rows + "</tbody></table>" if ragas_rows else ""}
 {corpus_section}
-
-<script>
-function exportCSV() {{
-  const n = document.querySelectorAll("tr[id^='row-']").length;
-  let csv = "N°,Nota Secuencia,Nota General,Aprobar,Comentarios\\n";
-  for (let i = 1; i <= n; i++) {{
-    const hs = document.getElementById("hs-"+i)?.value || "";
-    const hg = document.getElementById("hg-"+i)?.value || "";
-    const ha = document.getElementById("ha-"+i)?.value || "";
-    const hc = (document.getElementById("hc-"+i)?.value || "").replace(/"/g,'""');
-    csv += `${{i}},${{hs}},${{hg}},${{ha}},"${{hc}}"\\n`;
-  }}
-  const blob = new Blob([csv], {{type:"text/csv"}});
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href = url; a.download = "human_review_filled.csv"; a.click();
-}}
-</script>
-
 </body>
 </html>'''
-
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"  HTML guardado: {path}")
+        with open(technical_path, "w", encoding="utf-8") as f:
+            f.write(technical_html)
+        print(f"  HTML técnico RAGAS/Corpus guardado: {technical_path}")
