@@ -13,6 +13,7 @@ from evaluation.config import config
 from evaluation.llm_judge import LLMJudgeEvaluator
 from evaluation.ragas_alignment import align_judge_with_ragas
 from evaluation.reporter import save_html, save_human_review_csv
+from evaluation.step_semantic_judge import StepSemanticJudge
 from evaluation.tracking import _flatten_metrics
 
 
@@ -121,6 +122,21 @@ def _sample_result(case: dict, readiness: dict) -> dict:
         "total_checks": 10,
         "violations": [] if case["structure"].get("verdict") == "PASS" else ["Synthetic structure violation"],
     }
+    step_distinctness = case.get("step_distinctness", {
+        "score": 10.0,
+        "verdict": "PASS",
+        "reason": "Synthetic distinct steps.",
+        "strengths": [],
+        "weak_steps": [],
+        "weak_step_count": 0,
+    })
+    step_overlap = case.get("step_overlap", {
+        "evaluated": False,
+        "trigger": "no_weak_steps",
+        "overlapping_pairs": [],
+        "issue_count": 0,
+        "non_overlap_notes": [],
+    })
     return {
         "question": f"Synthetic validation question: {name}",
         "category": "metric_validation",
@@ -151,6 +167,8 @@ def _sample_result(case: dict, readiness: dict) -> dict:
             "explanation": "Synthetic sequence validation.",
         },
         "mese": mese,
+        "step_distinctness": step_distinctness,
+        "step_overlap": step_overlap,
         "roadmap_readiness": readiness,
         "structure": structure,
         "similarity": {"semantic": 0.0, "tfidf": 0.0},
@@ -164,7 +182,11 @@ def _sample_result(case: dict, readiness: dict) -> dict:
 def _validate_readiness_cases() -> list[dict]:
     samples = []
     for case in CASES:
-        readiness = LLMJudgeEvaluator._roadmap_readiness(case["mese"], case["structure"])
+        readiness = LLMJudgeEvaluator._roadmap_readiness(
+            case["mese"],
+            case["structure"],
+            case.get("step_distinctness"),
+        )
         assert readiness["status"] == case["expected_readiness"], (
             case["name"],
             readiness["status"],
@@ -176,6 +198,56 @@ def _validate_readiness_cases() -> list[dict]:
         )
         samples.append(_sample_result(case, readiness))
     return samples
+
+
+def _validate_step_distinctness() -> None:
+    class _FakeResponse:
+        content = """{
+          "step_distinctness": {
+            "score": 6.5,
+            "verdict": "NEEDS_REVIEW",
+            "reason": "Two steps have weak unique outputs.",
+            "strengths": ["The roadmap separates validation from application."],
+            "weak_steps": [
+              {"step": 1, "label": "Create date table", "reason": "Weak unique output"},
+              {"step": 2, "label": "Build calendar table", "reason": "Similar responsibility"}
+            ]
+          },
+          "step_overlap": {
+            "evaluated": true,
+            "trigger": "weak_steps_detected",
+            "overlapping_pairs": [
+              {
+                "steps": [1, 2],
+                "severity": "medium",
+                "overlap_type": "same_output",
+                "explanation": "Both steps create a date/calendar table.",
+                "recommendation": "Merge or clarify separate outputs."
+              }
+            ],
+            "non_overlap_notes": []
+          }
+        }"""
+
+    class _FakeLLM:
+        def invoke(self, _prompt):
+            return _FakeResponse()
+
+    result = StepSemanticJudge(llm=_FakeLLM()).evaluate({"steps": []})
+    distinctness = result["step_distinctness"]
+    overlap = result["step_overlap"]
+    assert distinctness["score"] == 6.5
+    assert distinctness["weak_step_count"] == 2
+    assert overlap["evaluated"] is True
+    assert overlap["issue_count"] == 1
+
+    readiness = LLMJudgeEvaluator._roadmap_readiness(
+        {"mapping": 8, "exhaustiveness": 8, "sequence": 8, "experience": 8},
+        {"score": 8, "verdict": "PASS"},
+        distinctness,
+    )
+    assert readiness["status"] == "NEEDS_REVIEW"
+    assert "Step distinctness" in readiness["reason"]
 
 
 def _validate_aliases_and_flatten(samples: list[dict]) -> dict:
@@ -202,6 +274,11 @@ def _validate_aliases_and_flatten(samples: list[dict]) -> dict:
         "roadmap.completeness",
         "roadmap.logical_order",
         "roadmap.actionability",
+        "roadmap.step_distinctness",
+        "step.distinctness.score",
+        "step.distinctness.weak_step_count",
+        "step.overlap.issue_count",
+        "step.overlap.evaluated_count",
         "roadmap.summary_score",
         "grounding.support_score",
         "roadmap.readiness_code",
@@ -283,8 +360,8 @@ def _validate_report_rendering(judge_results: dict) -> None:
     csv_text = csv_path.read_text(encoding="utf-8-sig")
 
     for expected in [
-        "Stakeholder Insights + Developer Diagnostics",
-        "Roadmap Quality",
+        "Batch Overview",
+        "Case Details",
         "Readiness",
         "Grounding",
         "Completeness",
@@ -302,13 +379,14 @@ def _validate_report_rendering(judge_results: dict) -> None:
 
 def run() -> None:
     samples = _validate_readiness_cases()
+    _validate_step_distinctness()
     judge_results = _validate_aliases_and_flatten(samples)
     _validate_ragas_alignment()
     _validate_report_rendering(judge_results)
 
     print("Controlled metric validation passed")
     print(f"  cases: {len(CASES)}")
-    print("  validated: readiness gating, RAGAS alignment, aliases, MLflow flattening, report rendering")
+    print("  validated: readiness gating, step distinctness, RAGAS alignment, aliases, MLflow flattening, report rendering")
 
 
 if __name__ == "__main__":

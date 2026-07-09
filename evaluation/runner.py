@@ -37,6 +37,7 @@ def print_summary(judge_results: dict, ragas_results: dict, corpus_results: dict
         print(f"  │    Completeness:      {roadmap.get('completeness', 0):.2f}")
         print(f"  │    Logical Order:     {roadmap.get('logical_order', 0):.2f}")
         print(f"  │    Actionability:     {roadmap.get('actionability', 0):.2f}")
+        print(f"  │    Step Distinctness: {roadmap.get('step_distinctness', 0):.2f}")
         print(f"  ├─ Roadmaps Ready:      {readiness.get('ready_rate', judge_results.get('readiness_ready_rate', 0)):.0%}")
         print(f"  ├─ Roadmaps Failed:     {readiness.get('fail_rate', judge_results.get('readiness_fail_rate', 0)):.0%}")
         print(f"  ├─ Secuencias OK:       {seq.get('valid_pct', 0):.0%}")

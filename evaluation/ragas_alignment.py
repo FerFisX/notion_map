@@ -80,6 +80,7 @@ def align_judge_with_ragas(judge_results: dict | None, ragas_results: dict | Non
         sample["roadmap_readiness"] = LLMJudgeEvaluator._roadmap_readiness(
             sample["mese"],
             sample.get("structure", {}),
+            sample.get("step_distinctness", {}),
         )
         sample["grounding"] = {
             "support_score": sample["mese"]["mapping"],
