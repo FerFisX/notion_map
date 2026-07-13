@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from evaluation.config import config
-from evaluation.step_semantic_judge import StepSemanticJudge
+from evaluation.metrics.step_semantic_judge import StepSemanticJudge
 from src.llm_provider import active_model_name
 
 
