@@ -28,9 +28,9 @@ from pydantic import BaseModel, Field
 from evaluation.config import config, EvalConfig
 from evaluation.dataset import EvalSample
 from evaluation.rag_adapter import RagAdapter
-from evaluation.structure_validator import StructureValidator
-from evaluation.step_semantic_judge import StepSemanticJudge
-from evaluation.similarity_metrics import query_answer_relevance
+from evaluation.metrics.structure_validator import StructureValidator
+from evaluation.metrics.step_semantic_judge import StepSemanticJudge
+from evaluation.metrics.similarity_metrics import query_answer_relevance
 from src.llm_provider import get_llm, active_model_name
 
 

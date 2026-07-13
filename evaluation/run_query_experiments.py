@@ -162,9 +162,9 @@ def _run_one(variant: str, question: str, comparison_group: str, batch_name: str
     from evaluation.llm_judge import LLMJudgeEvaluator
     from evaluation.rag_adapter import RagAdapter
     from evaluation.reporter import save_human_review_csv, save_html, save_json
-    from evaluation.similarity_metrics import query_answer_relevance
-    from evaluation.step_semantic_judge import StepSemanticJudge
-    from evaluation.structure_validator import StructureValidator
+    from evaluation.metrics.similarity_metrics import query_answer_relevance
+    from evaluation.metrics.step_semantic_judge import StepSemanticJudge
+    from evaluation.metrics.structure_validator import StructureValidator
     from evaluation.tracking import ARTIFACT_DIR, EXPERIMENT, TRACKING_URI
     from src.llm_provider import active_model_name
 

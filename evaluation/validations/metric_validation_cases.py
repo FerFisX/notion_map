@@ -13,7 +13,7 @@ from evaluation.config import config
 from evaluation.llm_judge import LLMJudgeEvaluator
 from evaluation.ragas_alignment import align_judge_with_ragas
 from evaluation.reporter import save_html, save_human_review_csv
-from evaluation.step_semantic_judge import StepSemanticJudge
+from evaluation.metrics.step_semantic_judge import StepSemanticJudge
 from evaluation.tracking import _flatten_metrics
 
 

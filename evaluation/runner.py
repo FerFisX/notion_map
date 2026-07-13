@@ -101,7 +101,7 @@ def run(mode: str = "all", n_samples: int = None, html: bool = True,
 
     # validacion de estructura sin LLM
     if mode == "structure":
-        from evaluation.structure_validator import StructureValidator
+        from evaluation.metrics.structure_validator import StructureValidator
         validator = StructureValidator()
         struct_results = []
         for sample in samples:
