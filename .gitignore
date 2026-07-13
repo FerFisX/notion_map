@@ -21,3 +21,4 @@ __pycache__/
 # Bases y artefactos generados localmente
 vectorstore/
 data/notion_exports/
+evaluation/reports/

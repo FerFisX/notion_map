@@ -53,10 +53,49 @@ Do NOT include "non-duplication" as a Step Distinctness criterion. If steps are
 weak because they overlap, identify them as weak_steps and explain overlap in
 the Step Overlap section.
 
+Use this scoring scale explicitly:
+- 8-10: strong roadmap; steps are unique, necessary, and clearly separated.
+  Minor wording similarity or repeated domain terms are acceptable.
+- 5-7: review needed; some steps have noticeable overlap, weak
+  differentiation, or similar objectives, actions, outputs, or responsibilities.
+- 0-4: unusable or structurally weak step design; several steps repeat the
+  same task, output, learning objective, or responsibility, making the roadmap
+  hard to use without restructuring.
+
+Important distinction:
+- Use 5-7 when the roadmap has isolated or moderate overlap but can still be
+  approved after clarification.
+- Use 0-4 when overlap affects multiple steps or core parts of the roadmap, so
+  the roadmap should not be approved without restructuring. This does NOT mean
+  every step is useless; it means the step design is not usable as-is.
+- If the roadmap contains multiple duplicate clusters, repeated tasks across
+  several steps, or 2+ meaningful overlapping pairs, prefer the 0-4 band.
+
+When choosing the score, first identify the closest band from the scale, then
+choose the numeric value inside that band. Explain the score using this scale.
+The score is the final verdict. Do not give a high score if Step Overlap finds
+meaningful redundancy.
+
+Score consistency guidance:
+- The score must be understandable on its own in a first reading.
+- Use Step Overlap diagnostics to inform the score, not as a separate final
+  verdict the reader must combine manually.
+- A roadmap with no meaningful overlap should receive a high score.
+- A roadmap with noticeable overlap should receive a middle score.
+- A roadmap with strong repeated work should receive a low score.
+- Do not assign a high score only because some steps remain useful if the
+  roadmap has clear duplicated objectives, actions, outputs, or responsibilities.
+- Use the full 0-10 scale naturally. Avoid clustering all imperfect roadmaps
+  around the same value.
+
 STEP OVERLAP
-Only evaluate overlap when Step Distinctness has weak_steps or score < 7.
-If there are no weak steps and score >= 7, set:
-  evaluated=false, trigger="no_weak_steps", overlapping_pairs=[]
+Evaluate overlap when Step Distinctness has weak_steps, score < 7, or score is
+between 7 and 8.5 inclusive. The 7-8.5 band is important because medium-overlap
+cases often hide behind otherwise useful steps.
+
+If there are no weak steps and score > 8.5, set:
+  evaluated=false, trigger="no_weak_steps", overall_severity="none",
+  overlapping_pairs=[]
 
 If evaluated, explain whether weak steps overlap due to:
 - same_task
@@ -65,11 +104,25 @@ If evaluated, explain whether weak steps overlap due to:
 - same_responsibility
 - weak_differentiation
 
+Use this overlap severity scale:
+- none: no meaningful overlap; repeated words are only necessary domain terms.
+- low: slight similarity, but steps still have clearly different outputs or
+  responsibilities.
+- medium: noticeable overlap; one or more steps should be clarified, merged, or
+  differentiated.
+- high: strong duplication; steps repeat the same task, output, learning
+  objective, or responsibility.
+
+Use high severity when duplication affects multiple steps, repeated clusters,
+or core roadmap actions, even if some other steps remain useful.
+
 Expected JSON schema:
 {{
-  "step_distinctness": {{
+    "step_distinctness": {{
     "score": <0-10>,
     "verdict": "PASS|NEEDS_REVIEW|FAIL",
+    "score_band": "8-10|5-7|0-4",
+    "score_rationale": "<why this score belongs to that band>",
     "reason": "<short explanation>",
     "strengths": ["<strength>", ...],
     "weak_steps": [
@@ -82,11 +135,12 @@ Expected JSON schema:
   }},
   "step_overlap": {{
     "evaluated": <true|false>,
-    "trigger": "no_weak_steps|weak_steps_detected|low_distinctness_score",
+    "trigger": "no_weak_steps|weak_steps_detected|medium_band_review|low_distinctness_score",
+    "overall_severity": "none|low|medium|high",
     "overlapping_pairs": [
       {{
         "steps": [<step number>, <step number>],
-        "severity": "low|medium|high",
+        "severity": "none|low|medium|high",
         "overlap_type": "same_task|same_output|same_learning_objective|same_responsibility|weak_differentiation",
         "explanation": "<why these steps overlap or are weakly differentiated>",
         "recommendation": "<how to clarify, split, or merge them>"
@@ -121,6 +175,14 @@ def _verdict(score: float) -> str:
     return "FAIL"
 
 
+def _score_band(score: float) -> str:
+    if score >= 8:
+        return "8-10"
+    if score >= 5:
+        return "5-7"
+    return "0-4"
+
+
 def _fallback_result(error: Exception | None = None) -> dict:
     reason = "Step semantic judge failed; manual review is required."
     if error:
@@ -129,6 +191,8 @@ def _fallback_result(error: Exception | None = None) -> dict:
         "step_distinctness": {
             "score": 5.0,
             "verdict": "NEEDS_REVIEW",
+            "score_band": "5-7",
+            "score_rationale": reason,
             "reason": reason,
             "strengths": [],
             "weak_steps": [],
@@ -136,6 +200,7 @@ def _fallback_result(error: Exception | None = None) -> dict:
         "step_overlap": {
             "evaluated": False,
             "trigger": "judge_error",
+            "overall_severity": "none",
             "overlapping_pairs": [],
             "non_overlap_notes": [],
         },
@@ -152,15 +217,6 @@ def _normalize_result(result: dict[str, Any]) -> dict:
     if not isinstance(weak_steps, list):
         weak_steps = []
 
-    normalized_distinctness = {
-        "score": score,
-        "verdict": distinctness.get("verdict") or _verdict(score),
-        "reason": str(distinctness.get("reason", "")),
-        "strengths": distinctness.get("strengths") if isinstance(distinctness.get("strengths"), list) else [],
-        "weak_steps": weak_steps,
-        "weak_step_count": len(weak_steps),
-    }
-
     evaluated = bool(overlap.get("evaluated"))
     pairs = overlap.get("overlapping_pairs") or []
     if not isinstance(pairs, list):
@@ -169,12 +225,40 @@ def _normalize_result(result: dict[str, Any]) -> dict:
     if not isinstance(non_overlap_notes, list):
         non_overlap_notes = []
 
-    if not evaluated and (weak_steps or score < 7):
+    if not evaluated and (weak_steps or score <= 8.5):
         evaluated = True
+    overall_severity = str(overlap.get("overall_severity") or "").lower().strip()
+    if overall_severity not in {"none", "low", "medium", "high"}:
+        if pairs:
+            severity_rank = {"none": 0, "low": 1, "medium": 2, "high": 3}
+            observed = [
+                str(pair.get("severity", "")).lower().strip()
+                for pair in pairs
+                if str(pair.get("severity", "")).lower().strip() in severity_rank
+            ]
+            overall_severity = max(observed, key=lambda value: severity_rank[value]) if observed else "medium"
+        else:
+            overall_severity = "none"
+
+    score_rationale = str(distinctness.get("score_rationale", ""))
+
+    normalized_distinctness = {
+        "score": score,
+        "verdict": distinctness.get("verdict") or _verdict(score),
+        "score_band": distinctness.get("score_band") or _score_band(score),
+        "score_rationale": score_rationale,
+        "reason": str(distinctness.get("reason", "")),
+        "strengths": distinctness.get("strengths") if isinstance(distinctness.get("strengths"), list) else [],
+        "weak_steps": weak_steps,
+        "weak_step_count": len(weak_steps),
+    }
 
     normalized_overlap = {
         "evaluated": evaluated,
-        "trigger": overlap.get("trigger") or ("weak_steps_detected" if weak_steps else "no_weak_steps"),
+        "trigger": overlap.get("trigger") or (
+            "weak_steps_detected" if weak_steps else "medium_band_review" if score <= 8.5 else "no_weak_steps"
+        ),
+        "overall_severity": overall_severity,
         "overlapping_pairs": pairs,
         "issue_count": len(pairs),
         "non_overlap_notes": non_overlap_notes,
@@ -214,4 +298,3 @@ class StepSemanticJudge:
             return _normalize_result(parsed)
         except Exception as exc:  # keep evaluation runs resilient
             return _fallback_result(exc)
-
