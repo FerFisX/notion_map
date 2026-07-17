@@ -1,198 +1,137 @@
-"""
-Validación determinística de la estructura del roadmap (forma, no contenido).
-Cada check es pass/fail con peso; el score final es 0-10. No usa LLM.
+"""Deterministic validation of the roadmap technical schema contract.
+
+This metric checks whether the generated roadmap has the minimum shape required
+by downstream consumers such as reports, renderers, and evaluators. It does not
+judge semantic quality, learning quality, or whether the number of steps fits
+the user's question.
 """
 
 from __future__ import annotations
-import re
+
 from dataclasses import dataclass
-from typing import List
+from typing import Any
 
-
-# Verbos de acción aceptados en labels (español e inglés)
-_ACTION_VERBS = {
-    # Español
-    "verificar", "validar", "crear", "configurar", "instalar", "analizar",
-    "definir", "implementar", "diseñar", "ejecutar", "revisar", "establecer",
-    "comprobar", "generar", "obtener", "conectar", "agregar", "eliminar",
-    "actualizar", "optimizar", "probar", "documentar", "migrar", "transformar",
-    "calcular", "seleccionar", "identificar", "evaluar", "construir", "aplicar",
-    "normalizar", "indexar", "mapear", "registrar", "iniciar", "finalizar",
-    "desplegar", "integrar", "preparar", "exportar", "importar", "limpiar",
-    "asegurar", "monitorear", "depurar", "configurar", "habilitar", "deshabilitar",
-    "detectar", "corregir", "publicar", "completar", "determinar", "establecer",
-    "asignar", "cargar", "descargar", "instanciar", "inicializar", "terminar",
-    # Inglés (por si el LLM responde en inglés)
-    "verify", "validate", "create", "configure", "install", "analyze",
-    "define", "implement", "design", "execute", "review", "establish",
-    "check", "generate", "obtain", "connect", "add", "remove", "update",
-    "optimize", "test", "document", "migrate", "transform", "calculate",
-    "select", "identify", "evaluate", "build", "apply", "normalize",
-    "index", "map", "register", "start", "finalize", "deploy", "integrate",
-    "prepare", "export", "import", "clean", "ensure", "monitor", "debug",
-    "enable", "disable", "detect", "fix", "publish", "complete", "determine",
-    "assign", "load", "download", "instantiate", "initialize", "terminate",
-}
 
 _VALID_TYPES = {"inicio", "proceso", "decision", "fin"}
+_REQUIRED_STEP_FIELDS = ("id", "label", "description", "type")
 
 
 @dataclass
 class _Check:
-    name:    str
-    passed:  bool
-    detail:  str
-    weight:  float = 1.0
+    name: str
+    passed: bool
+    detail: str
+    weight: float = 1.0
 
 
 class StructureValidator:
-    """Valida la estructura de un roadmap generado por el RAG."""
+    """Validate the technical schema contract of a generated roadmap."""
 
-    PASS_THRESHOLD = 7.0  # score mínimo para PASS
+    PASS_THRESHOLD = 7.0
 
-    def validate(self, roadmap: dict) -> dict:
-        steps: List[dict] = roadmap.get("steps", [])
-        checks: List[_Check] = []
+    def validate(self, roadmap: dict[str, Any]) -> dict[str, Any]:
+        raw_steps = roadmap.get("steps", [])
+        steps = raw_steps if isinstance(raw_steps, list) else []
+        checks: list[_Check] = []
 
-        # cantidad de pasos
-        n = len(steps)
         checks.append(_Check(
-            "step_count", 6 <= n <= 12,
-            f"{n} pasos (requiere 6-12)",
-            weight=1.5,
-        ))
-
-        # título presente
-        title = roadmap.get("title", "").strip()
-        checks.append(_Check(
-            "has_title", bool(title),
-            f"Título: '{title[:60]}'" if title else "Sin título",
-        ))
-
-        # IDs únicos
-        ids = [s.get("id", "") for s in steps]
-        dups = [id_ for id_ in set(ids) if ids.count(id_) > 1]
-        checks.append(_Check(
-            "unique_ids", not dups,
-            "IDs únicos" if not dups else f"IDs duplicados: {dups}",
-        ))
-
-        # exactamente un nodo 'inicio'
-        inicio_n = sum(1 for s in steps if s.get("type") == "inicio")
-        checks.append(_Check(
-            "single_inicio", inicio_n == 1,
-            f"Nodos 'inicio': {inicio_n} (debe ser 1)",
+            "has_steps",
+            bool(steps),
+            f"{len(steps)} steps" if steps else "No steps found",
             weight=1.2,
         ))
 
-        # exactamente un nodo 'fin'
-        fin_n = sum(1 for s in steps if s.get("type") == "fin")
+        title = str(roadmap.get("title", "")).strip()
         checks.append(_Check(
-            "single_fin", fin_n == 1,
-            f"Nodos 'fin': {fin_n} (debe ser 1)",
+            "has_title",
+            bool(title),
+            f"Title: '{title[:60]}'" if title else "Missing title",
+        ))
+
+        ids = [str(step.get("id", "")).strip() for step in steps if isinstance(step, dict)]
+        duplicates = [id_ for id_ in set(ids) if id_ and ids.count(id_) > 1]
+        checks.append(_Check(
+            "unique_ids",
+            not duplicates,
+            "Unique IDs" if not duplicates else f"Duplicate IDs: {duplicates}",
+        ))
+
+        inicio_count = sum(1 for step in steps if isinstance(step, dict) and step.get("type") == "inicio")
+        checks.append(_Check(
+            "single_inicio",
+            inicio_count == 1,
+            f"'inicio' nodes: {inicio_count} (must be 1)",
             weight=1.2,
         ))
 
-        # primer paso es 'inicio'
-        if steps:
-            first_type = steps[0].get("type", "")
-            checks.append(_Check(
-                "starts_with_inicio", first_type == "inicio",
-                f"Primer paso tipo '{first_type}' (debe ser 'inicio')",
-            ))
+        fin_count = sum(1 for step in steps if isinstance(step, dict) and step.get("type") == "fin")
+        checks.append(_Check(
+            "single_fin",
+            fin_count == 1,
+            f"'fin' nodes: {fin_count} (must be 1)",
+            weight=1.2,
+        ))
 
-        # último paso es 'fin'
-        if steps:
-            last_type = steps[-1].get("type", "")
-            checks.append(_Check(
-                "ends_with_fin", last_type == "fin",
-                f"Último paso tipo '{last_type}' (debe ser 'fin')",
-            ))
-
-        # tipos válidos en todos los pasos
-        bad_types = [
-            f"'{s.get('label','?')}' tipo='{s.get('type')}'"
-            for s in steps
-            if s.get("type") not in _VALID_TYPES
+        invalid_types = [
+            f"'{step.get('label', '?')}' type='{step.get('type')}'"
+            for step in steps
+            if isinstance(step, dict) and step.get("type") not in _VALID_TYPES
         ]
         checks.append(_Check(
-            "valid_types", not bad_types,
-            "Todos los tipos son válidos" if not bad_types
-                else f"Tipos inválidos: {bad_types[:3]}",
+            "valid_types",
+            not invalid_types,
+            "All step types are valid" if not invalid_types
+            else f"Invalid types: {invalid_types[:3]}",
         ))
 
-        # key_points: entre 3 y 5 por paso
-        kp_bad = [
-            f"'{s.get('label','?')}': {len(s.get('key_points', []))} key_points"
-            for s in steps
-            if not (3 <= len(s.get("key_points", [])) <= 5)
+        empty_fields = []
+        for step in steps:
+            if not isinstance(step, dict):
+                empty_fields.append("non-dict step")
+                continue
+            for field in _REQUIRED_STEP_FIELDS:
+                if not str(step.get(field, "")).strip():
+                    empty_fields.append(f"step '{step.get('id', '?')}' field '{field}'")
+        checks.append(_Check(
+            "required_fields_present",
+            not empty_fields,
+            "Required fields are present" if not empty_fields
+            else f"Missing or empty fields: {empty_fields[:3]}",
+        ))
+
+        key_points_bad = [
+            f"'{step.get('label', '?')}' key_points={type(step.get('key_points')).__name__}"
+            for step in steps
+            if not isinstance(step, dict)
+            or "key_points" not in step
+            or not isinstance(step.get("key_points"), list)
         ]
         checks.append(_Check(
-            "key_points_count", not kp_bad,
-            "Todos tienen 3-5 key_points" if not kp_bad
-                else f"Fuera de rango: {kp_bad[:3]}",
-            weight=1.5,
+            "key_points_list",
+            not key_points_bad,
+            "All steps have key_points as a list" if not key_points_bad
+            else f"Invalid key_points: {key_points_bad[:3]}",
         ))
 
-        # label empieza con verbo de acción
-        label_bad = []
-        for s in steps:
-            raw_label = s.get("label", "").strip()
-            first = raw_label.lower().split()[0] if raw_label.split() else ""
-            has_verb = first in _ACTION_VERBS or any(
-                first.startswith(v) for v in _ACTION_VERBS if len(v) >= 4
-            )
-            if not has_verb:
-                label_bad.append(raw_label[:60])
-        checks.append(_Check(
-            "label_action_verb", not label_bad,
-            "Todos los labels usan verbo de acción" if not label_bad
-                else f"Sin verbo de acción: {label_bad[:3]}",
-            weight=1.2,
-        ))
-
-        # description >= 2 oraciones y >= 60 caracteres
-        desc_bad = []
-        for s in steps:
-            desc = s.get("description", "")
-            sentences = [p.strip() for p in re.split(r"[.!?]+", desc) if p.strip()]
-            if len(sentences) < 2 or len(desc) < 60:
-                desc_bad.append(
-                    f"'{s.get('label','?')}' ({len(sentences)} oraciones, {len(desc)} chars)"
-                )
-        checks.append(_Check(
-            "description_min_length", not desc_bad,
-            "Todas las descripciones tienen >=2 oraciones" if not desc_bad
-                else f"Descripciones cortas: {desc_bad[:3]}",
-            weight=1.3,
-        ))
-
-        # sin campos vacíos
-        empty_bad = []
-        for s in steps:
-            for field in ("id", "label", "description", "type"):
-                if not str(s.get(field, "")).strip():
-                    empty_bad.append(f"paso '{s.get('id','?')}' campo '{field}'")
-        checks.append(_Check(
-            "no_empty_fields", not empty_bad,
-            "Sin campos vacíos" if not empty_bad else f"Vacíos: {empty_bad[:3]}",
-        ))
-
-        # score ponderado
-        total_w    = sum(c.weight for c in checks)
-        passed_w   = sum(c.weight for c in checks if c.passed)
-        score      = round((passed_w / total_w) * 10, 2) if total_w else 0.0
-        passed_n   = sum(1 for c in checks if c.passed)
+        total_weight = sum(check.weight for check in checks)
+        passed_weight = sum(check.weight for check in checks if check.passed)
+        score = round((passed_weight / total_weight) * 10, 2) if total_weight else 0.0
+        passed_count = sum(1 for check in checks if check.passed)
 
         return {
-            "score":        score,
-            "verdict":      "PASS" if score >= self.PASS_THRESHOLD else "FAIL",
-            "passed":       passed_n,
+            "score": score,
+            "verdict": "PASS" if score >= self.PASS_THRESHOLD else "FAIL",
+            "passed": passed_count,
             "total_checks": len(checks),
-            "pass_rate":    round(passed_n / len(checks), 4) if checks else 0.0,
+            "pass_rate": round(passed_count / len(checks), 4) if checks else 0.0,
             "checks": [
-                {"name": c.name, "passed": c.passed, "detail": c.detail, "weight": c.weight}
-                for c in checks
+                {
+                    "name": check.name,
+                    "passed": check.passed,
+                    "detail": check.detail,
+                    "weight": check.weight,
+                }
+                for check in checks
             ],
-            "violations": [c.detail for c in checks if not c.passed],  # solo los que fallaron
+            "violations": [check.detail for check in checks if not check.passed],
         }

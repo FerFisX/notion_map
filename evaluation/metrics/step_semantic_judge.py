@@ -54,22 +54,22 @@ weak because they overlap, identify them as weak_steps and explain overlap in
 the Step Overlap section.
 
 Use this scoring scale explicitly:
-- 8-10: strong roadmap; steps are unique, necessary, and clearly separated.
+- 8.0-10.0: strong roadmap; steps are unique, necessary, and clearly separated.
   Minor wording similarity or repeated domain terms are acceptable.
-- 5-7: review needed; some steps have noticeable overlap, weak
+- 5.0-7.9: review needed; some steps have noticeable overlap, weak
   differentiation, or similar objectives, actions, outputs, or responsibilities.
-- 0-4: unusable or structurally weak step design; several steps repeat the
+- 0.0-4.9: unusable or structurally weak step design; several steps repeat the
   same task, output, learning objective, or responsibility, making the roadmap
   hard to use without restructuring.
 
 Important distinction:
-- Use 5-7 when the roadmap has isolated or moderate overlap but can still be
+- Use 5.0-7.9 when the roadmap has isolated or moderate overlap but can still be
   approved after clarification.
-- Use 0-4 when overlap affects multiple steps or core parts of the roadmap, so
+- Use 0.0-4.9 when overlap affects multiple steps or core parts of the roadmap, so
   the roadmap should not be approved without restructuring. This does NOT mean
   every step is useless; it means the step design is not usable as-is.
 - If the roadmap contains multiple duplicate clusters, repeated tasks across
-  several steps, or 2+ meaningful overlapping pairs, prefer the 0-4 band.
+  several steps, or 2+ meaningful overlapping pairs, prefer the 0.0-4.9 band.
 
 When choosing the score, first identify the closest band from the scale, then
 choose the numeric value inside that band. Explain the score using this scale.
@@ -121,7 +121,7 @@ Expected JSON schema:
     "step_distinctness": {{
     "score": <0-10>,
     "verdict": "PASS|NEEDS_REVIEW|FAIL",
-    "score_band": "8-10|5-7|0-4",
+    "score_band": "8.0-10.0|5.0-7.9|0.0-4.9",
     "score_rationale": "<why this score belongs to that band>",
     "reason": "<short explanation>",
     "strengths": ["<strength>", ...],
@@ -177,10 +177,10 @@ def _verdict(score: float) -> str:
 
 def _score_band(score: float) -> str:
     if score >= 8:
-        return "8-10"
+        return "8.0-10.0"
     if score >= 5:
-        return "5-7"
-    return "0-4"
+        return "5.0-7.9"
+    return "0.0-4.9"
 
 
 def _fallback_result(error: Exception | None = None) -> dict:
@@ -191,7 +191,7 @@ def _fallback_result(error: Exception | None = None) -> dict:
         "step_distinctness": {
             "score": 5.0,
             "verdict": "NEEDS_REVIEW",
-            "score_band": "5-7",
+            "score_band": "5.0-7.9",
             "score_rationale": reason,
             "reason": reason,
             "strengths": [],
