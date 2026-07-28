@@ -56,11 +56,19 @@ def get_llm(temperature: float = 0.1, max_tokens: int = 4096):
 
     if provider == "ollama":
         from langchain_ollama import ChatOllama
-        return ChatOllama(
-            model=os.getenv("OLLAMA_MODEL_ID", "llama3.2"),
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            temperature=temperature,
-        )
+
+        ollama_kwargs = {
+            "model": os.getenv("OLLAMA_MODEL_ID", "llama3.2"),
+            "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            "temperature": temperature,
+        }
+        seed = os.getenv("OLLAMA_SEED", "").strip()
+        if seed:
+            try:
+                ollama_kwargs["seed"] = int(seed)
+            except ValueError as exc:
+                raise ValueError("OLLAMA_SEED must be an integer") from exc
+        return ChatOllama(**ollama_kwargs)
 
     raise ValueError(
         f"LLM_PROVIDER='{provider}' no reconocido.\n"
