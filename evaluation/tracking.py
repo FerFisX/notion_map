@@ -30,46 +30,38 @@ def _flatten_metrics(judge: dict, ragas: dict, corpus: dict) -> dict:
     m: dict[str, float] = {}
 
     if judge:
-        agg    = judge.get("aggregated", {})
-        mese   = agg.get("mese", {})
-        roadmap = agg.get("roadmap", {})
-        grounding = agg.get("grounding", {})
+        agg = judge.get("aggregated", {})
+        metric_results = agg.get("metrics", {})
         readiness = agg.get("readiness", {})
-        retrieval = agg.get("retrieval", {})
-        answer = agg.get("answer", {})
-        seq    = agg.get("sequence", {})
-        struct = agg.get("structure", {})
-        sim    = agg.get("similarity", {})
-        rt     = agg.get("response_time", {})
+        diagnostics = agg.get("diagnostics", {})
+        schema = agg.get("schema_validity", {})
+        rt = agg.get("response_time", {})
 
-        m["judge.overall_score"]   = agg.get("overall_score", 0)
-        m["judge.pass_rate"]       = judge.get("pass_rate", 0)
-        m["roadmap.summary_pass_rate"] = judge.get("mese_pass_rate", 0)
-        m["roadmap.completeness"]  = roadmap.get("completeness", mese.get("exhaustiveness", 0))
-        m["roadmap.logical_order"] = roadmap.get("logical_order", mese.get("sequence", 0))
-        m["roadmap.actionability"] = roadmap.get("actionability", mese.get("experience", 0))
-        m["roadmap.step_distinctness"] = roadmap.get("step_distinctness", 0)
-        m["step.distinctness.score"] = roadmap.get("step_distinctness", 0)
-        m["step.distinctness.weak_step_count"] = roadmap.get("weak_step_count", 0)
-        m["step.overlap.issue_count"] = roadmap.get("step_overlap_issue_count", 0)
-        m["step.overlap.evaluated_count"] = roadmap.get("step_overlap_evaluated_count", 0)
-        m["roadmap.summary_score"] = roadmap.get("summary_score", mese.get("composite", 0))
-        m["grounding.support_score"] = grounding.get("support_score", mese.get("mapping", 0))
-        m["retrieval.context_precision"] = retrieval.get("context_precision", 0)
-        m["retrieval.context_recall"] = retrieval.get("context_recall", 0)
-        m["answer.relevancy"] = answer.get("relevancy", 0)
-        m["roadmap.readiness_code"] = readiness.get("mean_code", 0)
-        m["roadmap.ready_rate"]     = readiness.get("ready_rate", judge.get("readiness_ready_rate", 0))
+        m["evaluation.sample_count"] = judge.get("sample_count", 0)
+        m["evaluation.failure_count"] = judge.get("failure_count", 0)
+        for name, values in metric_results.items():
+            prefix = f"roadmap.{name}"
+            m[f"{prefix}.mean_score"] = values.get("mean_score", 0)
+            m[f"{prefix}.pass_rate"] = values.get("pass_rate", 0)
+            m[f"{prefix}.needs_review_rate"] = values.get("needs_review_rate", 0)
+            m[f"{prefix}.fail_rate"] = values.get("fail_rate", 0)
+
+        if schema:
+            m["schema_validity.mean_score"] = schema.get("mean_score", 0)
+            m["schema_validity.pass_rate"] = schema.get("pass_rate", 0)
+        for name, value in diagnostics.items():
+            m[f"diagnostics.{name}"] = value
+
+        m["roadmap.ready_rate"] = readiness.get("ready_rate", 0)
         m["roadmap.needs_review_rate"] = readiness.get("needs_review_rate", 0)
-        m["roadmap.fail_rate"]      = readiness.get("fail_rate", judge.get("readiness_fail_rate", 0))
-        m["sequence.mean_score"]   = seq.get("mean_score", 0)
-        m["sequence.valid_pct"]    = seq.get("valid_pct", 0)
-        m["structure.mean_score"]  = struct.get("mean_score", 0)
-        m["structure.pass_rate"]   = struct.get("pass_rate", 0)
-        m["similarity.semantic"]   = sim.get("mean_semantic", 0)
-        m["similarity.tfidf"]      = sim.get("mean_tfidf", 0)
-        m["response_time.mean_s"]  = rt.get("mean_s", 0)
-        m["response_time.max_s"]   = rt.get("max_s", 0)
+        m["roadmap.fail_rate"] = readiness.get("fail_rate", 0)
+        m["roadmap.not_evaluated_rate"] = readiness.get("not_evaluated_rate", 0)
+        m["response_time.generation_mean_s"] = rt.get("mean_s", 0)
+        m["response_time.generation_max_s"] = rt.get("max_s", 0)
+        m["response_time.total_wall_s"] = agg.get("total_wall_time_s", 0)
+        for name, values in agg.get("metric_timings", {}).items():
+            m[f"response_time.{name}.mean_s"] = values.get("mean_s", 0)
+            m[f"response_time.{name}.max_s"] = values.get("max_s", 0)
 
     if ragas:
         for name, vals in ragas.get("aggregated", {}).items():

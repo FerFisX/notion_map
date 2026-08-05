@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.llm_provider import get_llm
+from src.llm_provider import get_judge_llm
 
 
 _COVERAGE_STATES = {"covered", "partial", "missing"}
@@ -508,7 +508,7 @@ class CompletenessJudge:
     """Evaluate roadmap Completeness against an explicit or inferred universe."""
 
     def __init__(self, llm=None):
-        self.llm = llm or get_llm(temperature=0.0, max_tokens=4096)
+        self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=4096)
 
     def _invoke(self, prompt: str) -> str:
         return self.llm.invoke(prompt).content

@@ -8,9 +8,10 @@ coverage, order, distinctness, or global roadmap structure.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
-from src.llm_provider import get_llm
+from src.llm_provider import get_judge_llm, invoke_llm_text
 
 
 _CRITERIA = (
@@ -440,6 +441,144 @@ def _fallback_result(
     }
 
 
+def _resolve_step_id(
+    raw_step_id: Any,
+    step_by_id: dict[str, dict[str, Any]],
+) -> str | None:
+    """Resolve unambiguous formatting variants without changing judge content."""
+    value = str(raw_step_id or "").strip()
+    if value in step_by_id:
+        return value
+
+    lowered = value.casefold()
+    by_label = {
+        str(step.get("label", "")).strip().casefold(): step_id
+        for step_id, step in step_by_id.items()
+        if str(step.get("label", "")).strip()
+    }
+    if lowered in by_label:
+        return by_label[lowered]
+
+    match = re.fullmatch(r"(?:step[\s_-]*)?(\d+)", lowered)
+    if match:
+        position = int(match.group(1))
+        ids = list(step_by_id)
+        if 1 <= position <= len(ids):
+            return ids[position - 1]
+    return None
+
+
+def _step_contract_issues(
+    result: dict[str, Any],
+    roadmap: dict[str, Any],
+) -> list[str]:
+    """Identify incomplete per-step coverage before normalization can mask it."""
+    raw = result.get("actionability")
+    if not isinstance(raw, dict):
+        return ["missing actionability object"]
+    entries = raw.get("step_actionability")
+    if not isinstance(entries, list):
+        return ["missing step_actionability list"]
+
+    steps = _roadmap_steps(roadmap)
+    step_by_id = {
+        str(step.get("id", "")).strip(): step
+        for step in steps
+        if str(step.get("id", "")).strip()
+    }
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            unknown.append("<non-object>")
+            continue
+        raw_id = str(item.get("step_id", "")).strip()
+        step_id = _resolve_step_id(raw_id, step_by_id)
+        if step_id is None:
+            unknown.append(raw_id or "<empty>")
+        else:
+            resolved.append(step_id)
+
+    expected = list(step_by_id)
+    missing = [step_id for step_id in expected if step_id not in resolved]
+    duplicates = sorted({step_id for step_id in resolved if resolved.count(step_id) > 1})
+    issues = []
+    if missing:
+        issues.append(f"missing step IDs: {', '.join(missing)}")
+    if duplicates:
+        issues.append(f"duplicate step IDs: {', '.join(duplicates)}")
+    if unknown:
+        issues.append(f"unknown step IDs: {', '.join(unknown)}")
+    return issues
+
+
+def _missing_step_ids(
+    result: dict[str, Any],
+    roadmap: dict[str, Any],
+) -> list[str]:
+    raw = result.get("actionability")
+    entries = raw.get("step_actionability", []) if isinstance(raw, dict) else []
+    steps = _roadmap_steps(roadmap)
+    step_by_id = {
+        str(step.get("id", "")).strip(): step
+        for step in steps
+        if str(step.get("id", "")).strip()
+    }
+    resolved = {
+        step_id
+        for item in entries if isinstance(item, dict)
+        if (step_id := _resolve_step_id(item.get("step_id"), step_by_id))
+    }
+    return [step_id for step_id in step_by_id if step_id not in resolved]
+
+
+def _missing_steps_retry_prompt(
+    roadmap: dict[str, Any],
+    missing_ids: list[str],
+) -> str:
+    missing_steps = [
+        step for step in _roadmap_steps(roadmap)
+        if str(step.get("id", "")).strip() in set(missing_ids)
+    ]
+    return f"""\
+You are completing an Actionability evaluation whose roadmap-level result was
+already produced. Return ONLY valid JSON and evaluate exactly these missing
+steps: {missing_ids}.
+
+For each step, assess identifiable action, execution method, starting point,
+expected result, and execution specificity. Use score 8.0-10.0 when executable
+with little interpretation, 5.0-7.9 when local clarification is needed, and
+0.0-4.9 when the main procedure must be invented. Optional detail must not
+lower the score. Use exact step IDs.
+
+MISSING ROADMAP STEPS
+{json.dumps(missing_steps, ensure_ascii=False, indent=2)}
+
+Return exactly:
+{{
+  "actionability": {{
+    "step_actionability": [
+      {{
+        "step_id": "<exact missing ID>",
+        "score": <0-10>,
+        "criteria": {{
+          "identifiable_action": "met|partial|missing|not_applicable",
+          "execution_method": "met|partial|missing|not_applicable",
+          "starting_point": "met|partial|missing|not_applicable",
+          "expected_result": "met|partial|missing|not_applicable",
+          "execution_specificity": "met|partial|missing|not_applicable"
+        }},
+        "reason": "<short case-specific reason>",
+        "material_missing_elements": ["action|method|input|output|specificity"],
+        "optional_improvements": [],
+        "recommendation": "<local recommendation or empty string>"
+      }}
+    ]
+  }}
+}}
+"""
+
+
 def _normalize_result(
     result: dict[str, Any],
     roadmap: dict[str, Any],
@@ -469,11 +608,16 @@ def _normalize_result(
             notes.append("Ignored a non-object step Actionability entry.")
             manual_review_required = True
             continue
-        step_id = str(item.get("step_id", "")).strip()
-        if step_id not in step_by_id:
-            notes.append("Discarded a step Actionability entry with an unknown step ID.")
+        raw_step_id = str(item.get("step_id", "")).strip()
+        step_id = _resolve_step_id(raw_step_id, step_by_id)
+        if step_id is None:
+            notes.append(
+                f"Discarded a step Actionability entry with unknown step ID '{raw_step_id}'."
+            )
             manual_review_required = True
             continue
+        if step_id != raw_step_id:
+            notes.append(f"Mapped step ID '{raw_step_id}' to '{step_id}'.")
         if step_id in entries_by_id:
             notes.append("Discarded a duplicate step Actionability entry.")
             manual_review_required = True
@@ -672,10 +816,15 @@ class ActionabilityJudge:
     """Evaluate roadmap Actionability with per-step semantic diagnostics."""
 
     def __init__(self, llm=None):
-        self.llm = llm or get_llm(temperature=0.0, max_tokens=4096)
+        self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=4096)
 
-    def _invoke(self, prompt: str) -> str:
-        return self.llm.invoke(prompt).content
+    def _invoke(self, prompt: str, attempt: int = 1) -> str:
+        return invoke_llm_text(
+            self.llm,
+            prompt,
+            operation="Actionability",
+            attempt=attempt,
+        )
 
     def evaluate(
         self,
@@ -689,21 +838,55 @@ class ActionabilityJudge:
             roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2)[:7000],
         )
         try:
-            raw = self._invoke(prompt)
+            raw = self._invoke(prompt, attempt=1)
             retried = False
+            retry_reason = ""
             try:
                 parsed = _parse_json_response(raw)
             except (json.JSONDecodeError, ValueError):
-                retry_prompt = (
-                    f"{prompt}\n\nRETRY REQUIREMENT\n"
-                    "The previous response was not valid JSON. Return the complete JSON object only."
+                retry_reason = "the previous response was not valid JSON"
+                parsed = None
+            if parsed is not None:
+                contract_issues = _step_contract_issues(parsed, roadmap)
+                if contract_issues:
+                    retry_reason = "; ".join(contract_issues)
+            if retry_reason:
+                expected_ids = [
+                    str(step.get("id", "")).strip()
+                    for step in _roadmap_steps(roadmap)
+                    if str(step.get("id", "")).strip()
+                ]
+                print(
+                    f"      [LLM] Actionability contract incomplete ({retry_reason}); "
+                    "starting one corrective retry.",
+                    flush=True,
                 )
-                parsed = _parse_json_response(self._invoke(retry_prompt))
+                missing_ids = _missing_step_ids(parsed, roadmap) if parsed else []
+                targeted_retry = bool(parsed and missing_ids and all(
+                    issue.startswith("missing step IDs:") for issue in contract_issues
+                ))
+                if targeted_retry:
+                    retry_prompt = _missing_steps_retry_prompt(roadmap, missing_ids)
+                    patch = _parse_json_response(self._invoke(retry_prompt, attempt=2))
+                    patch_root = patch.get("actionability", {})
+                    patch_entries = patch_root.get("step_actionability", [])
+                    if not isinstance(patch_entries, list):
+                        raise ValueError("Actionability retry did not return step entries")
+                    parsed["actionability"]["step_actionability"].extend(patch_entries)
+                else:
+                    retry_prompt = (
+                        f"{prompt}\n\nRETRY REQUIREMENT\n"
+                        f"The previous response was incomplete because {retry_reason}. "
+                        "Return valid JSON with exactly one step_actionability entry "
+                        f"for each of these IDs, in this order: {expected_ids}. "
+                        "Return the complete JSON object only."
+                    )
+                    parsed = _parse_json_response(self._invoke(retry_prompt, attempt=2))
                 retried = True
             normalized = _normalize_result(parsed, roadmap)
             if retried:
                 normalized["actionability"]["normalization_notes"].append(
-                    "Retried once after an invalid JSON response."
+                    f"Retried once after an incomplete response: {retry_reason}."
                 )
             return normalized
         except Exception as exc:

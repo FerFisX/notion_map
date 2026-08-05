@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.llm_provider import get_llm
+from src.llm_provider import get_judge_llm, invoke_llm_text
 
 
 _PROMPT_TEMPLATE = """\
@@ -527,10 +527,15 @@ class LogicalOrderJudge:
     """Evaluate roadmap dependency order with a dedicated LLM judge."""
 
     def __init__(self, llm=None):
-        self.llm = llm or get_llm(temperature=0.0, max_tokens=2048)
+        self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=2048)
 
-    def _invoke(self, prompt: str) -> str:
-        return self.llm.invoke(prompt).content
+    def _invoke(self, prompt: str, attempt: int = 1) -> str:
+        return invoke_llm_text(
+            self.llm,
+            prompt,
+            operation="Logical Order",
+            attempt=attempt,
+        )
 
     def evaluate(
         self,
@@ -554,22 +559,53 @@ class LogicalOrderJudge:
             current_order="\n".join(current_order_lines) or "(no steps)",
         )
         try:
-            raw = self._invoke(prompt)
+            raw = self._invoke(prompt, attempt=1)
             retried = False
+            retry_reason = ""
             try:
                 parsed = _parse_json_response(raw)
             except (json.JSONDecodeError, ValueError):
+                retry_reason = "the previous response was not valid JSON"
+                print(
+                    "      [LLM] Logical Order returned invalid JSON; "
+                    "starting one corrective retry.",
+                    flush=True,
+                )
                 retry_prompt = (
                     f"{prompt}\n\nRETRY REQUIREMENT\n"
                     "The previous response was not valid JSON. Return the complete JSON object only."
                 )
-                retry_raw = self._invoke(retry_prompt)
+                retry_raw = self._invoke(retry_prompt, attempt=2)
                 parsed = _parse_json_response(retry_raw)
                 retried = True
             normalized = _normalize_result(parsed, roadmap)
+            if (
+                not retried
+                and normalized["logical_order"].get("manual_review_required")
+            ):
+                notes = normalized["logical_order"].get("normalization_notes", [])
+                retry_reason = "; ".join(str(note) for note in notes)
+                print(
+                    "      [LLM] Logical Order contract inconsistent; "
+                    "starting one corrective retry.",
+                    flush=True,
+                )
+                retry_prompt = (
+                    f"{prompt}\n\nRETRY REQUIREMENT\n"
+                    "The previous JSON violated the evaluation contract: "
+                    f"{retry_reason}. Re-evaluate the CURRENT STEP POSITIONS, "
+                    "ensure every predecessor is currently after its dependent "
+                    "step, and make score, violations, and suggested_order "
+                    "consistent. Return the complete JSON object only."
+                )
+                parsed = _parse_json_response(
+                    self._invoke(retry_prompt, attempt=2)
+                )
+                normalized = _normalize_result(parsed, roadmap)
+                retried = True
             if retried:
                 normalized["logical_order"]["normalization_notes"].append(
-                    "Retried once after an invalid JSON response."
+                    f"Retried once after an incomplete response: {retry_reason}."
                 )
             return normalized
         except Exception as exc:

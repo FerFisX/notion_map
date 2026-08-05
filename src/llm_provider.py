@@ -1,18 +1,44 @@
-"""Fábrica central de LLM. El proveedor se elige con LLM_PROVIDER en el .env."""
+"""Provider-neutral LLM factory selected through ``LLM_PROVIDER``."""
 
 import os
+import time
+from typing import Any
 
 _SUPPORTED = ("bedrock", "anthropic", "openai", "gemini", "ollama")
 
 
-def get_llm(temperature: float = 0.1, max_tokens: int = 4096):
+def _request_timeout() -> float:
+    raw = os.getenv("LLM_REQUEST_TIMEOUT", "300").strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError("LLM_REQUEST_TIMEOUT must be a positive number") from exc
+    if value <= 0:
+        raise ValueError("LLM_REQUEST_TIMEOUT must be a positive number")
+    return value
+
+
+def get_llm(
+    temperature: float = 0.1,
+    max_tokens: int = 4096,
+    *,
+    reasoning_mode: str = "provider_default",
+    structured_output: bool = False,
+):
     """
     Devuelve el LLM configurado en LLM_PROVIDER.
     Lanza ValueError si el proveedor no está soportado o faltan credenciales.
     """
     provider = os.getenv("LLM_PROVIDER", "bedrock").lower().strip()
+    timeout = _request_timeout()
+    reasoning_mode = reasoning_mode.lower().strip()
+    if reasoning_mode not in {"provider_default", "disabled", "enabled"}:
+        raise ValueError(
+            "reasoning_mode must be provider_default, disabled, or enabled"
+        )
 
     if provider == "bedrock":
+        from botocore.config import Config
         from langchain_aws import ChatBedrock
         model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
         region   = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
@@ -22,6 +48,10 @@ def get_llm(temperature: float = 0.1, max_tokens: int = 4096):
             model_id=model_id,
             model_kwargs={"temperature": temperature, "max_tokens": max_tokens},
             region_name=region,
+            config=Config(
+                connect_timeout=min(10.0, timeout),
+                read_timeout=timeout,
+            ),
         )
 
     if provider == "anthropic":
@@ -32,6 +62,7 @@ def get_llm(temperature: float = 0.1, max_tokens: int = 4096):
             api_key=os.getenv("ANTHROPIC_API_KEY"),
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout=timeout,
         )
 
     if provider == "openai":
@@ -42,6 +73,7 @@ def get_llm(temperature: float = 0.1, max_tokens: int = 4096):
             api_key=os.getenv("OPENAI_API_KEY"),
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout=timeout,
         )
 
     if provider == "gemini":
@@ -52,6 +84,7 @@ def get_llm(temperature: float = 0.1, max_tokens: int = 4096):
             google_api_key=os.getenv("GEMINI_API_KEY"),
             temperature=temperature,
             max_output_tokens=max_tokens,
+            timeout=timeout,
         )
 
     if provider == "ollama":
@@ -61,7 +94,14 @@ def get_llm(temperature: float = 0.1, max_tokens: int = 4096):
             "model": os.getenv("OLLAMA_MODEL_ID", "llama3.2"),
             "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             "temperature": temperature,
+            "num_predict": max_tokens,
+            "client_kwargs": {"timeout": timeout},
+            "async_client_kwargs": {"timeout": timeout},
         }
+        if reasoning_mode != "provider_default":
+            ollama_kwargs["reasoning"] = reasoning_mode == "enabled"
+        if structured_output:
+            ollama_kwargs["format"] = "json"
         seed = os.getenv("OLLAMA_SEED", "").strip()
         if seed:
             try:
@@ -74,6 +114,44 @@ def get_llm(temperature: float = 0.1, max_tokens: int = 4096):
         f"LLM_PROVIDER='{provider}' no reconocido.\n"
         f"Opciones válidas: {', '.join(_SUPPORTED)}"
     )
+
+
+def get_judge_llm(temperature: float = 0.0, max_tokens: int = 4096):
+    """Create an evaluator LLM while keeping generation policy independent."""
+    mode = os.getenv("LLM_JUDGE_REASONING_MODE", "disabled")
+    return get_llm(
+        temperature=temperature,
+        max_tokens=max_tokens,
+        reasoning_mode=mode,
+        structured_output=True,
+    )
+
+
+def invoke_llm_text(
+    llm: Any,
+    prompt: str,
+    *,
+    operation: str,
+    attempt: int = 1,
+) -> str:
+    """Invoke any configured provider with consistent attempt observability."""
+    started = time.perf_counter()
+    try:
+        response = llm.invoke(prompt)
+    except Exception as exc:
+        elapsed = time.perf_counter() - started
+        print(
+            f"      [LLM] {operation} attempt {attempt} failed after "
+            f"{elapsed:.2f}s: {type(exc).__name__}",
+            flush=True,
+        )
+        raise
+    elapsed = time.perf_counter() - started
+    print(
+        f"      [LLM] {operation} attempt {attempt} completed in {elapsed:.2f}s",
+        flush=True,
+    )
+    return str(getattr(response, "content", response))
 
 
 def active_model_name() -> str:
