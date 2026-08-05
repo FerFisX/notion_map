@@ -1,180 +1,396 @@
-"""CLI para correr las evaluaciones (RAGAS, LLM Judge, corpus, estructura)."""
+"""CLI for canonical roadmap, optional RAGAS, and corpus evaluations."""
 
-import os
-import sys
+from __future__ import annotations
+
 import argparse
+import importlib.util
+import json
+import os
+import urllib.request
+from typing import Iterable
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BASE_DIR)
-
-from evaluation.config  import config
-from evaluation.dataset import EVAL_SAMPLES
-from evaluation.ragas_alignment import align_judge_with_ragas
+from evaluation.config import config
+from evaluation.dataset import EVAL_SAMPLES, EvalSample
 from evaluation.rag_adapter import RagAdapter
-from evaluation.reporter import save_json, save_html, save_human_review_csv
+from evaluation.reporter import save_html, save_json
+from evaluation.run_session import (
+    RunCheckpoint,
+    RunProgress,
+    create_run_dir,
+    selected_metric_count,
+)
 from evaluation.tracking import log_evaluation
+from src.llm_provider import active_model_name
 
 
-def print_summary(judge_results: dict, ragas_results: dict, corpus_results: dict = None):
+CLI_METRICS = (
+    "grounding",
+    "completeness",
+    "actionability",
+    "logical_order",
+    "structure_quality",
+    "step_distinctness",
+    "schema_validity",
+)
+
+_ORCHESTRATOR_NAMES = {
+    "grounding": "grounding",
+    "completeness": "completeness",
+    "actionability": "actionability",
+    "logical_order": "logical_order",
+    "structure_quality": "structure_quality",
+    "step_distinctness": "step_semantics",
+    "schema_validity": "schema_validity",
+}
+
+
+def _check_ollama(model: str) -> tuple[bool, str]:
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{base_url}/api/tags", timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        names = {
+            str(item.get("name", ""))
+            for item in payload.get("models", [])
+            if isinstance(item, dict)
+        }
+        available = model in names or any(name.split(":")[0] == model for name in names)
+        return available, f"Ollama model {'available' if available else 'not found'}: {model}"
+    except Exception as exc:
+        return False, f"Ollama unavailable at {base_url}: {type(exc).__name__}"
+
+
+def _preflight(
+    mode: str,
+    samples: list[EvalSample],
+    mlflow_enabled: bool,
+    requires_generation: bool,
+) -> None:
+    checks: list[tuple[bool, str, bool]] = []
+    if mode != "corpus":
+        checks.append((bool(samples), f"Samples selected: {len(samples)}", True))
+
+    provider = os.getenv("LLM_PROVIDER", "bedrock").lower().strip()
+    model = active_model_name()
+    checks.append((provider in {"bedrock", "anthropic", "openai", "gemini", "ollama"}, f"Provider: {provider} | model: {model}", True))
+    credential_vars = {
+        "bedrock": ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"),
+        "anthropic": ("ANTHROPIC_API_KEY",),
+        "openai": ("OPENAI_API_KEY",),
+        "gemini": ("GEMINI_API_KEY",),
+    }
+    if provider == "ollama":
+        ok, message = _check_ollama(model)
+        checks.append((ok, message, True))
+    elif provider in credential_vars:
+        missing = [name for name in credential_vars[provider] if not os.getenv(name)]
+        checks.append((not missing, "Provider credentials configured" if not missing else f"Missing credentials: {', '.join(missing)}", True))
+
+    if requires_generation or mode == "corpus":
+        checks.append((os.path.isdir(config.vectorstore_dir), f"Vectorstore: {config.vectorstore_dir}", True))
+    if mode == "ragas":
+        checks.append((importlib.util.find_spec("ragas") is not None, "RAGAS dependency installed", True))
+    if mlflow_enabled:
+        checks.append((importlib.util.find_spec("mlflow") is not None, "MLflow dependency installed", False))
+
+    print("\nPREFLIGHT")
+    blocking_failures = []
+    for passed, message, blocking in checks:
+        label = "OK" if passed else "FAIL" if blocking else "WARN"
+        print(f"  [{label}] {message}")
+        if not passed and blocking:
+            blocking_failures.append(message)
+    if blocking_failures:
+        raise ValueError("Preflight failed: " + "; ".join(blocking_failures))
+
+
+def _print_execution_plan(
+    mode: str,
+    samples: list[EvalSample],
+    selected_metrics: list[str] | None,
+    requires_generation: bool,
+    mlflow_enabled: bool,
+    resume: bool,
+) -> None:
+    metrics = selected_metrics or list(_ORCHESTRATOR_NAMES.values())
+    semantic_calls = sum(name != "schema_validity" for name in metrics)
+    print("\nEXECUTION PLAN")
+    print(f"  Mode: {mode}")
+    if mode == "judge":
+        print(f"  Samples: {len(samples)}")
+        print(f"  Metrics: {', '.join(metrics)}")
+        print(f"  Roadmap generations: {len(samples) if requires_generation else 0}")
+        print(f"  Judge calls: {len(samples) * semantic_calls}")
+        print(f"  Deterministic schema checks: {len(samples) if 'schema_validity' in metrics else 0}")
+        print(f"  Resume: {'yes' if resume else 'no'}")
+    print(f"  MLflow: {'enabled' if mlflow_enabled else 'disabled'}")
+    print("  No LLM calls were made by this dry run.")
+
+
+def parse_metrics(value: str | Iterable[str] | None) -> list[str] | None:
+    """Normalize public metric names into the internal orchestrator selection."""
+    if value is None:
+        return None
+    raw = value.split(",") if isinstance(value, str) else list(value)
+    names = []
+    for item in raw:
+        name = str(item).strip().lower()
+        if name and name not in names:
+            names.append(name)
+    unknown = set(names) - set(CLI_METRICS)
+    if unknown:
+        raise ValueError(
+            f"Unknown metrics: {', '.join(sorted(unknown))}. "
+            f"Available: {', '.join(CLI_METRICS)}"
+        )
+    return [_ORCHESTRATOR_NAMES[name] for name in names]
+
+
+def _print_judge_summary(results: dict) -> None:
+    aggregate = results.get("aggregated", {})
+    metrics = aggregate.get("metrics", {})
+    readiness = aggregate.get("readiness", {})
+    schema = aggregate.get("schema_validity", {})
     print("\n" + "=" * 60)
-    print("  RESUMEN DE EVALUACIÓN")
+    print("  ROADMAP EVALUATION SUMMARY")
     print("=" * 60)
-
-    if judge_results:
-        agg    = judge_results["aggregated"]
-        roadmap = agg.get("roadmap", {})
-        grounding = agg.get("grounding", {})
-        readiness = agg.get("readiness", {})
-        seq    = agg.get("sequence", {})
-        struct = agg.get("structure", {})
-        rt     = agg.get("response_time", {})
-
-        print(f"\n  Roadmap Evaluation")
-        print(f"  ├─ Score General:       {agg.get('overall_score', 0):.2f}/10")
-        print(f"  ├─ Pass Rate:           {judge_results['pass_rate']:.0%}")
-        print(f"  ├─ Summary Score:       {roadmap.get('summary_score', 0):.2f}/10")
-        print(f"  │    Grounding:         {grounding.get('support_score', 0):.2f}")
-        print(f"  │    Completeness:      {roadmap.get('completeness', 0):.2f}")
-        print(f"  │    Logical Order:     {roadmap.get('logical_order', 0):.2f}")
-        print(f"  │    Actionability:     {roadmap.get('actionability', 0):.2f}")
-        print(f"  │    Step Distinctness: {roadmap.get('step_distinctness', 0):.2f}")
-        print(f"  ├─ Roadmaps Ready:      {readiness.get('ready_rate', judge_results.get('readiness_ready_rate', 0)):.0%}")
-        print(f"  ├─ Roadmaps Failed:     {readiness.get('fail_rate', judge_results.get('readiness_fail_rate', 0)):.0%}")
-        print(f"  ├─ Secuencias OK:       {seq.get('valid_pct', 0):.0%}")
-        print(f"  ├─ Estructura:          {struct.get('mean_score', 0):.2f}/10  (pass: {struct.get('pass_rate', 0):.0%})")
-        print(f"  └─ Tiempo respuesta:    {rt.get('mean_s', 0):.1f}s promedio (max: {rt.get('max_s', 0):.1f}s)")
-
-    if ragas_results:
-        agg = ragas_results["aggregated"]
-        print(f"\n  RAGAS")
-        for metric, vals in agg.items():
-            print(f"  ├─ {metric:<25} {vals.get('mean', 0):.4f}")
-
-    if corpus_results and "overall_corpus_score" in corpus_results:
-        ca = corpus_results.get("aggregated", {})
-        sd = corpus_results.get("semantic_diversity", {})
-        cv = corpus_results.get("coverage", {})
-        print(f"\n  Corpus Judge")
-        print(f"  ├─ Score Corpus:        {corpus_results['overall_corpus_score']:.2f}/10  [{corpus_results['verdict']}]")
-        print(f"  ├─ Chunks evaluados:    {corpus_results['n_chunks_evaluated']}/{corpus_results['n_chunks_total']}")
-        print(f"  ├─ Calidad media:       {ca.get('avg_quality', 0):.2f}/10")
-        print(f"  │    Coherencia:        {ca.get('avg_coherencia', 0):.2f}")
-        print(f"  │    Densidad técnica:  {ca.get('avg_densidad_tecnica', 0):.2f}")
-        print(f"  │    Utilidad RAG:      {ca.get('avg_utilidad_rag', 0):.2f}")
-        print(f"  ├─ Diversidad semántica: {sd.get('diversity_score', 'N/A')}")
-        print(f"  │    Pares redundantes: {sd.get('redundant_pairs', 0)}")
-        print(f"  └─ Chunks con issues:  {ca.get('chunks_with_issues', 0)}")
-        if cv.get("observacion"):
-            print(f"\n  Obs. corpus: {cv['observacion']}")
-
-    print()
-    print("=" * 60)
+    for name, values in metrics.items():
+        label = name.replace("_", " ").title()
+        print(f"  {label:<24} {values.get('mean_score', 0):5.2f}/10")
+    if schema:
+        print(f"  {'Schema Validity':<24} {schema.get('mean_score', 0):5.2f}/10")
+    counts = readiness.get("counts", {})
+    print("\n  Readiness")
+    print(f"    Ready:        {counts.get('READY', 0)}")
+    print(f"    Needs review: {counts.get('NEEDS_REVIEW', 0)}")
+    print(f"    Failed:       {counts.get('FAIL', 0)}")
+    print(f"    Not evaluated:{counts.get('NOT_EVALUATED', 0):2d}")
+    response = aggregate.get("response_time", {})
+    print(f"\n  Generation time: {response.get('mean_s', 0):.1f}s mean")
 
 
-def run(mode: str = "all", n_samples: int = None, html: bool = True,
-        verbose: bool = False, max_corpus_chunks: int = 20,
-        run_name: str = None, mlflow_enabled: bool = True):
+def _print_ragas_summary(results: dict) -> None:
+    print("\nRAGAS ADDITIONAL DIAGNOSTICS")
+    for name, values in results.get("aggregated", {}).items():
+        print(f"  {name:<24} {values.get('mean', 0):.4f}")
 
-    if not os.getenv("AWS_ACCESS_KEY_ID"):
-        print("[!] AWS_ACCESS_KEY_ID no encontrada en .env")
-        sys.exit(1)
 
-    samples = EVAL_SAMPLES[:n_samples] if n_samples else EVAL_SAMPLES
+def _print_corpus_summary(results: dict) -> None:
+    aggregate = results.get("aggregated", {})
+    print("\nCORPUS DIAGNOSTICS")
+    print(f"  Overall score:       {results.get('overall_corpus_score', 0):.2f}/10")
+    print(f"  Average quality:     {aggregate.get('avg_quality', 0):.2f}/10")
+    print(f"  Chunks evaluated:    {results.get('n_chunks_evaluated', 0)}")
 
-    if mode not in ("corpus",):
-        print(f"\n  Evaluando {len(samples)} muestras | Modo: {mode}")
 
-    adapter        = RagAdapter()
-    ragas_results  = None
-    judge_results  = None
+def run(
+    mode: str = "judge",
+    n_samples: int | None = None,
+    html: bool = True,
+    verbose: bool = False,
+    max_corpus_chunks: int = 20,
+    run_name: str | None = None,
+    mlflow_enabled: bool = True,
+    metrics: str | Iterable[str] | None = None,
+    resume: str | None = None,
+    dry_run: bool = False,
+) -> None:
+    if mode not in {"judge", "ragas", "corpus"}:
+        raise ValueError("Mode must be judge, ragas, or corpus.")
+    if mode != "judge" and metrics is not None:
+        raise ValueError("--metrics is available only with --mode judge.")
+    if resume and mode != "judge":
+        raise ValueError("--resume is available only with --mode judge.")
+    if resume and metrics is not None:
+        raise ValueError("A resumed run uses the metric selection stored in its checkpoint.")
+
+    rerank_method = os.getenv("RERANK_METHOD", "mmr")
+    checkpoint = None
+    if resume:
+        checkpoint = RunCheckpoint.load(resume)
+        if checkpoint.state.get("mode") != "judge":
+            raise ValueError("Only judge checkpoints can be resumed.")
+        selected_metrics = list(checkpoint.state.get("selected_metrics", []))
+        samples = [
+            EvalSample(**entry["sample"])
+            for entry in checkpoint.state.get("samples", [])
+        ]
+        effective_run_name = str(checkpoint.state.get("run_name", "resumed-judge"))
+        run_dir = checkpoint.run_dir
+    else:
+        selected_metrics = parse_metrics(metrics)
+        samples = EVAL_SAMPLES[:n_samples] if n_samples else EVAL_SAMPLES
+        effective_run_name = run_name or f"{mode}-{rerank_method}"
+        run_dir = None
+    requires_generation = (
+        any(not entry.get("generated") for entry in checkpoint.state.get("samples", []))
+        if checkpoint
+        else mode in {"judge", "ragas"}
+    )
+    _preflight(mode, samples, mlflow_enabled, requires_generation)
+    if dry_run:
+        _print_execution_plan(
+            mode,
+            samples,
+            selected_metrics,
+            requires_generation,
+            mlflow_enabled,
+            bool(resume),
+        )
+        return
+    if checkpoint:
+        checkpoint.mark("RUNNING")
+    else:
+        run_dir = create_run_dir(config.reports_dir, effective_run_name)
+        if mode == "judge":
+            checkpoint = RunCheckpoint.create(
+                run_dir,
+                effective_run_name,
+                mode,
+                selected_metrics or list(_ORCHESTRATOR_NAMES.values()),
+                samples,
+                metadata={
+                    "model": active_model_name(),
+                    "llm_provider": os.getenv("LLM_PROVIDER", "bedrock"),
+                    "ollama_seed": os.getenv("OLLAMA_SEED", ""),
+                },
+            )
+    total_units = (
+        checkpoint.remaining_units()
+        if checkpoint
+        else len(samples) * (1 + selected_metric_count(selected_metrics))
+        if mode == "judge"
+        else 1
+    )
+    progress = RunProgress(run_dir, total_units)
+    ragas_results = None
+    judge_results = None
     corpus_results = None
 
-    if mode in ("ragas", "all"):
+    if mode == "judge":
+        from evaluation.metric_orchestrator import CanonicalMetricEvaluator, run_canonical_metrics
+
+        print(f"\nEvaluating {len(samples)} samples | mode: judge")
+        try:
+            needs_generation = any(
+                not entry.get("generated")
+                for entry in checkpoint.state.get("samples", [])
+            )
+            adapter = RagAdapter() if needs_generation else None
+            judge_results = run_canonical_metrics(
+                adapter,
+                samples,
+                verbose=verbose,
+                enabled_metrics=selected_metrics,
+                progress=progress,
+                checkpoint=checkpoint,
+            )
+        except KeyboardInterrupt:
+            checkpoint.mark("INTERRUPTED")
+            partial_samples = checkpoint.completed_results()
+            partial_results = {
+                "per_sample": partial_samples,
+                "aggregated": (
+                    CanonicalMetricEvaluator._aggregate(partial_samples)
+                    if partial_samples else {}
+                ),
+                "sample_count": len(partial_samples),
+                "failure_count": 0,
+                "failures": [],
+                "metric_contract": "canonical_v1_partial",
+            }
+            partial_path = str(run_dir / "eval_report.partial.json")
+            save_json({
+                "mode": "judge",
+                "status": "INTERRUPTED",
+                "judge": partial_results,
+                "checkpoint": str(checkpoint.path),
+            }, partial_path)
+            if html and partial_samples:
+                save_html(
+                    None,
+                    partial_results,
+                    str(run_dir / "eval_report.partial.html"),
+                )
+            progress.finish("INTERRUPTED")
+            print(f"\nPartial artifacts saved in: {run_dir}")
+            print(f"Resume with: python -m evaluation.runner --resume \"{run_dir}\"")
+            return
+        except Exception as exc:
+            checkpoint.mark("FAILED")
+            progress.stage_failed("Judge evaluation", exc)
+            progress.finish("FAILED")
+            raise
+        judge_results["aggregated"]["total_wall_time_s"] = progress.elapsed_seconds()
+        _print_judge_summary(judge_results)
+    elif mode == "ragas":
         from evaluation.ragas_evaluator import run_ragas
+
+        print(f"\nEvaluating {len(samples)} samples | mode: ragas")
+        progress.stage_started("RAGAS evaluation")
+        adapter = RagAdapter()
+        started = progress.elapsed_seconds()
         ragas_results = run_ragas(adapter, samples)
-
-    if mode in ("judge", "all"):
-        from evaluation.llm_judge import run_judge
-        judge_results = run_judge(adapter, samples, verbose=verbose)
-
-    judge_results = align_judge_with_ragas(judge_results, ragas_results)
-
-    # validacion de estructura sin LLM
-    if mode == "structure":
-        from evaluation.metrics.structure_validator import StructureValidator
-        validator = StructureValidator()
-        struct_results = []
-        for sample in samples:
-            result = adapter.query(sample.question)
-            sv = validator.validate(result["roadmap"])
-            struct_results.append({
-                "question": sample.question,
-                "structure": sv,
-            })
-            status = "[PASS]" if sv["verdict"] == "PASS" else "[FAIL]"
-            print(f"  {status} {sample.question[:60]}")
-            print(f"         score={sv['score']}/10  checks={sv['passed']}/{sv['total_checks']}")
-            for v in sv["violations"]:
-                print(f"         ! {v}")
-        print(f"\n  Estructura evaluada para {len(struct_results)} muestras.")
-        return
-
-    if mode in ("corpus", "all"):
+        progress.stage_completed(
+            "RAGAS evaluation",
+            progress.elapsed_seconds() - started,
+        )
+        _print_ragas_summary(ragas_results)
+    else:
         from evaluation.corpus_judge import run_corpus_judge
-        corpus_results = run_corpus_judge(max_chunks=max_corpus_chunks)
 
-    os.makedirs(config.reports_dir, exist_ok=True)
+        progress.stage_started("Corpus evaluation")
+        started = progress.elapsed_seconds()
+        corpus_results = run_corpus_judge(max_chunks=max_corpus_chunks)
+        progress.stage_completed(
+            "Corpus evaluation",
+            progress.elapsed_seconds() - started,
+        )
+        _print_corpus_summary(corpus_results)
 
     combined = {
-        "ragas":  ragas_results,
-        "judge":  judge_results,
+        "mode": mode,
+        "ragas": ragas_results,
+        "judge": judge_results,
         "corpus": corpus_results,
         "config": {
-            "model":        config.bedrock_model_id,
-            "n_samples":    len(samples),
-            "mese_weights": config.mese_weights,
-            "thresholds": {
-                "pass":     config.pass_threshold,
-                "mese":     config.mese_pass_threshold,
-                "sequence": config.sequence_min_score,
-            },
+            "model": active_model_name(),
+            "n_samples": len(samples) if mode != "corpus" else None,
+            "metrics": selected_metrics if mode == "judge" else None,
+            "metric_contract": "canonical_v1" if mode == "judge" else None,
+            "run_directory": str(run_dir),
         },
     }
-
-    json_path = os.path.join(config.reports_dir, "eval_report.json")
+    json_path = str(run_dir / "eval_report.json")
     save_json(combined, json_path)
 
-    if html:
-        html_path = os.path.join(config.reports_dir, "eval_report.html")
-        save_html(ragas_results, judge_results, html_path, corpus_results=corpus_results)
-
-    csv_path = None
-    if judge_results:
-        csv_path = os.path.join(config.reports_dir, "human_review.csv")
-        save_human_review_csv(judge_results, csv_path)
-
-    # MLflow tracking
-    rerank_method = os.getenv("RERANK_METHOD", "mmr")
-    params = {
-        "mode":          mode,
-        "model":         config.bedrock_model_id,
-        "llm_provider":  os.getenv("LLM_PROVIDER", "bedrock"),
-        "n_samples":     len(samples),
-        "rerank_method": rerank_method,
-        "pool_size":     os.getenv("RETRIEVAL_POOL_SIZE", "10"),
-        "top_n":         os.getenv("RETRIEVAL_TOP_N", "5"),
-        "judge_temp":    config.judge_temperature,
-        "pass_threshold":      config.pass_threshold,
-        "mese_pass_threshold": config.mese_pass_threshold,
-    }
     artifacts = [json_path]
     if html:
-        artifacts.append(os.path.join(config.reports_dir, "eval_report.html"))
-    if csv_path:
-        artifacts.append(csv_path)
+        html_path = str(run_dir / "eval_report.html")
+        save_html(ragas_results, judge_results, html_path, corpus_results=corpus_results)
+        artifacts.append(html_path)
 
+    params = {
+        "mode": mode,
+        "model": active_model_name(),
+        "llm_provider": os.getenv("LLM_PROVIDER", "bedrock"),
+        "n_samples": len(samples) if mode != "corpus" else 0,
+        "metrics": (
+            ",".join(selected_metrics or list(_ORCHESTRATOR_NAMES.values()))
+            if mode == "judge"
+            else "not_applicable"
+        ),
+        "metric_contract": "canonical_v1" if mode == "judge" else "not_applicable",
+        "rerank_method": rerank_method,
+        "pool_size": os.getenv("RETRIEVAL_POOL_SIZE", "10"),
+        "top_n": os.getenv("RETRIEVAL_TOP_N", "5"),
+        "judge_temp": config.judge_temperature,
+    }
+    artifacts.append(str(progress.log_path))
+    if checkpoint:
+        artifacts.append(str(checkpoint.path))
     log_evaluation(
-        run_name=run_name or f"{mode}-{rerank_method}",
+        run_name=effective_run_name,
         params=params,
         judge_results=judge_results,
         ragas_results=ragas_results,
@@ -183,40 +399,72 @@ def run(mode: str = "all", n_samples: int = None, html: bool = True,
         enabled=mlflow_enabled,
     )
 
-    print_summary(judge_results, ragas_results, corpus_results)
-
-    print(f"  Archivos generados en: {config.reports_dir}")
-    print(f"  ├─ eval_report.json")
+    if checkpoint:
+        checkpoint.mark("COMPLETED")
+    progress.finish("COMPLETED")
+    print(f"\nFiles generated in: {run_dir}")
+    print("  - eval_report.json")
     if html:
-        print(f"  ├─ eval_report.html  <- abrir en navegador")
-    if judge_results:
-        print(f"  └─ human_review.csv  <- tabla para revisión humana")
-    print()
+        print("  - eval_report.html")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NotionMap Evaluation Runner")
-    parser.add_argument("--mode", choices=["all", "ragas", "judge", "corpus", "structure"],
-                        default="all")
-    parser.add_argument("--samples",      type=int, default=None,
-                        help="Número de muestras (default: todas)")
-    parser.add_argument("--no-html",      action="store_true", help="No generar HTML")
-    parser.add_argument("--verbose",      action="store_true",
-                        help="Mostrar scores y justificaciones en consola")
-    parser.add_argument("--max-chunks",   type=int, default=20,
-                        help="Máximo chunks a evaluar en corpus judge (default: 20)")
-    parser.add_argument("--run-name",     type=str, default=None,
-                        help="Nombre del experimento en MLflow (default: modo-rerank)")
-    parser.add_argument("--no-mlflow",    action="store_true",
-                        help="No registrar la corrida en MLflow")
-    args = parser.parse_args()
-
-    run(
-        mode=args.mode,
-        n_samples=args.samples,
-        html=not args.no_html,
-        verbose=args.verbose,
-        max_corpus_chunks=args.max_chunks,
-        run_name=args.run_name,
-        mlflow_enabled=not args.no_mlflow,
+    parser.add_argument(
+        "--mode",
+        choices=("judge", "ragas", "corpus"),
+        default="judge",
+        help="Evaluation family to run (default: judge).",
     )
+    parser.add_argument("--samples", type=int, default=None)
+    parser.add_argument(
+        "--metrics",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated canonical metrics for judge mode: "
+            + ",".join(CLI_METRICS)
+        ),
+    )
+    parser.add_argument("--no-html", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--max-chunks", type=int, default=20)
+    parser.add_argument("--run-name", type=str, default=None)
+    parser.add_argument("--no-mlflow", action="store_true")
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Resume an interrupted judge run from its directory or checkpoint.json.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate configuration and print the execution plan without LLM calls.",
+    )
+    parser.add_argument("--list-metrics", action="store_true")
+    parser.add_argument("--list-samples", action="store_true")
+    args = parser.parse_args()
+    if args.list_metrics:
+        for name in CLI_METRICS:
+            print(name)
+        raise SystemExit(0)
+    if args.list_samples:
+        for index, sample in enumerate(EVAL_SAMPLES, 1):
+            print(f"{index}: [{sample.category}] {sample.question}")
+        raise SystemExit(0)
+    try:
+        run(
+            mode=args.mode,
+            n_samples=args.samples,
+            html=not args.no_html,
+            verbose=args.verbose,
+            max_corpus_chunks=args.max_chunks,
+            run_name=args.run_name,
+            mlflow_enabled=not args.no_mlflow,
+            metrics=args.metrics,
+            resume=args.resume,
+            dry_run=args.dry_run,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
