@@ -146,6 +146,24 @@ def parse_metrics(value: str | Iterable[str] | None) -> list[str] | None:
     return [_ORCHESTRATOR_NAMES[name] for name in names]
 
 
+def parse_sample_indices(value: str | None) -> list[int] | None:
+    """Parse one-based sample positions while preserving the requested order."""
+    if value is None:
+        return None
+    tokens = [item.strip() for item in value.split(",") if item.strip()]
+    if not tokens:
+        raise ValueError("--sample-indices requires at least one index.")
+    try:
+        indices = [int(item) for item in tokens]
+    except ValueError as exc:
+        raise ValueError("--sample-indices must contain comma-separated integers.") from exc
+    if any(index < 1 for index in indices):
+        raise ValueError("--sample-indices uses one-based positive indices.")
+    if len(indices) != len(set(indices)):
+        raise ValueError("--sample-indices cannot contain duplicate indices.")
+    return indices
+
+
 def _print_judge_summary(results: dict) -> None:
     aggregate = results.get("aggregated", {})
     metrics = aggregate.get("metrics", {})
@@ -194,6 +212,7 @@ def run(
     metrics: str | Iterable[str] | None = None,
     resume: str | None = None,
     dry_run: bool = False,
+    sample_indices: str | None = None,
 ) -> None:
     if mode not in {"judge", "ragas", "corpus"}:
         raise ValueError("Mode must be judge, ragas, or corpus.")
@@ -203,6 +222,10 @@ def run(
         raise ValueError("--resume is available only with --mode judge.")
     if resume and metrics is not None:
         raise ValueError("A resumed run uses the metric selection stored in its checkpoint.")
+    if n_samples is not None and sample_indices is not None:
+        raise ValueError("Use either --samples or --sample-indices, not both.")
+    if resume and (n_samples is not None or sample_indices is not None):
+        raise ValueError("A resumed run uses the samples stored in its checkpoint.")
 
     rerank_method = os.getenv("RERANK_METHOD", "mmr")
     checkpoint = None
@@ -219,7 +242,17 @@ def run(
         run_dir = checkpoint.run_dir
     else:
         selected_metrics = parse_metrics(metrics)
-        samples = EVAL_SAMPLES[:n_samples] if n_samples else EVAL_SAMPLES
+        requested_indices = parse_sample_indices(sample_indices)
+        if requested_indices:
+            invalid = [index for index in requested_indices if index > len(EVAL_SAMPLES)]
+            if invalid:
+                raise ValueError(
+                    "--sample-indices out of range: "
+                    f"{', '.join(map(str, invalid))}; dataset has {len(EVAL_SAMPLES)} samples."
+                )
+            samples = [EVAL_SAMPLES[index - 1] for index in requested_indices]
+        else:
+            samples = EVAL_SAMPLES[:n_samples] if n_samples else EVAL_SAMPLES
         effective_run_name = run_name or f"{mode}-{rerank_method}"
         run_dir = None
     requires_generation = (
@@ -418,6 +451,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--samples", type=int, default=None)
     parser.add_argument(
+        "--sample-indices",
+        type=str,
+        default=None,
+        help="Comma-separated one-based dataset indices, for example: 15,16,17.",
+    )
+    parser.add_argument(
         "--metrics",
         type=str,
         default=None,
@@ -457,6 +496,7 @@ if __name__ == "__main__":
         run(
             mode=args.mode,
             n_samples=args.samples,
+            sample_indices=args.sample_indices,
             html=not args.no_html,
             verbose=args.verbose,
             max_corpus_chunks=args.max_chunks,

@@ -10,7 +10,33 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from src.llm_provider import get_judge_llm
+from evaluation.structured_output import invoke_json_with_retry
+from src.llm_provider import get_judge_llm, invoke_llm_text
+
+
+_SCORE_CORRECTION_PROMPT = """\
+You are assigning the final Grounding score to claim diagnostics that have
+already been validated. Return ONLY valid JSON with no markdown or extra text.
+
+VALIDATED CLAIM DIAGNOSTICS
+{diagnostics}
+
+The claim statuses, importance levels, counts, and evidence are final. Do not
+add, remove, or reclassify claims. Choose a precise decimal score inside the
+mandatory {score_band} band and make the reason and recommendations describe
+those diagnostics. Do not score completeness, correctness against external
+knowledge, actionability, order, overlap, or structure.
+
+Return exactly:
+{{
+  "grounding_score_correction": {{
+    "score": <number in {score_band}>,
+    "reason": "<short explanation>",
+    "strengths": ["<grounding strength>"],
+    "recommendations": ["<grounding recommendation>"]
+  }}
+}}
+"""
 
 
 _CLAIM_STATUSES = {
@@ -227,6 +253,29 @@ def _score_band(score: float) -> str:
     if score >= 5.0:
         return "5.0-7.9"
     return "0.0-4.9"
+
+
+def _parse_score_correction(
+    raw: str,
+    minimum: float,
+    maximum: float,
+) -> dict[str, Any]:
+    parsed = _parse_json_response(raw)
+    correction = parsed.get("grounding_score_correction")
+    if not isinstance(correction, dict):
+        raise ValueError("grounding_score_correction must be an object")
+    score = _normalize_score(correction.get("score"))
+    if not minimum <= score <= maximum:
+        raise ValueError(
+            f"Grounding score {score} must be inside {minimum}-{maximum}"
+        )
+    if not str(correction.get("reason", "")).strip():
+        raise ValueError("Grounding score correction requires a reason")
+    if not isinstance(correction.get("strengths", []), list):
+        raise ValueError("Grounding strengths must be a list")
+    if not isinstance(correction.get("recommendations", []), list):
+        raise ValueError("Grounding recommendations must be a list")
+    return parsed
 
 
 def _roadmap_steps(roadmap: dict[str, Any]) -> list[dict[str, Any]]:
@@ -496,8 +545,13 @@ class GroundingJudge:
     def __init__(self, llm=None):
         self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=4096)
 
-    def _invoke(self, prompt: str) -> str:
-        return self.llm.invoke(prompt).content
+    def _invoke(self, prompt: str, attempt: int = 1) -> str:
+        return invoke_llm_text(
+            self.llm,
+            prompt,
+            operation="Grounding",
+            attempt=attempt,
+        )
 
     def evaluate(
         self,
@@ -512,22 +566,119 @@ class GroundingJudge:
             roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2),
         )
         try:
-            raw = self._invoke(prompt)
+            raw = self._invoke(prompt, attempt=1)
             retried = False
+            retry_reason = ""
             try:
                 parsed = _parse_json_response(raw)
             except (json.JSONDecodeError, ValueError):
+                retry_reason = "the previous response was not valid JSON"
                 retry_prompt = (
                     f"{prompt}\n\nRETRY REQUIREMENT\n"
                     "The previous response was not valid JSON. Return the complete JSON object only."
                 )
-                parsed = _parse_json_response(self._invoke(retry_prompt))
+                parsed = _parse_json_response(self._invoke(retry_prompt, attempt=2))
                 retried = True
             normalized = _normalize_result(parsed, roadmap, normalized_contexts)
-            if retried:
-                normalized["grounding"]["normalization_notes"].append(
-                    "Retried once after an invalid JSON response."
+            consistency_prefixes = (
+                "The score is below 8.0 despite full claim support.",
+                "The score is 5.0 or higher despite a core contradiction.",
+                "The score is 5.0 or higher despite zero supported claims.",
+                "The score is 8.0 or higher despite material grounding gaps.",
+            )
+            consistency_notes = [
+                str(note)
+                for note in normalized["grounding"].get("normalization_notes", [])
+                if str(note).startswith(consistency_prefixes)
+            ]
+            if consistency_notes and not retried:
+                retry_reason = "; ".join(consistency_notes)
+                print(
+                    "      [LLM] Grounding score contradicts claim diagnostics; "
+                    "starting one directed score correction.",
+                    flush=True,
                 )
+                if any(
+                    note.startswith(
+                        (
+                            "The score is 5.0 or higher despite a core contradiction.",
+                            "The score is 5.0 or higher despite zero supported claims.",
+                        )
+                    )
+                    for note in consistency_notes
+                ):
+                    minimum, maximum, mandatory_band = 0.0, 4.9, "0.0-4.9"
+                elif any(
+                    note.startswith(
+                        "The score is below 8.0 despite full claim support."
+                    )
+                    for note in consistency_notes
+                ):
+                    minimum, maximum, mandatory_band = 8.0, 10.0, "8.0-10.0"
+                else:
+                    minimum, maximum, mandatory_band = 5.0, 7.9, "5.0-7.9"
+                diagnostics = {
+                    "evaluable_claim_count": normalized["grounding"][
+                        "evaluable_claim_count"
+                    ],
+                    "supported_claim_count": normalized["grounding"][
+                        "supported_claim_count"
+                    ],
+                    "unsupported_claims": normalized["grounding"][
+                        "unsupported_claims"
+                    ],
+                    "contradictions": normalized["grounding"]["contradictions"],
+                    "claim_support_pct": normalized["grounding"][
+                        "claim_support_pct"
+                    ],
+                }
+                correction_prompt = _SCORE_CORRECTION_PROMPT.format(
+                    diagnostics=json.dumps(
+                        diagnostics, ensure_ascii=False, indent=2
+                    )[:7000],
+                    score_band=mandatory_band,
+                )
+                correction_result, correction_trace = invoke_json_with_retry(
+                    self.llm,
+                    correction_prompt,
+                    operation="Grounding score correction",
+                    parser=lambda raw: _parse_score_correction(
+                        raw, minimum, maximum
+                    ),
+                    repair_instruction=(
+                        "Return the complete grounding_score_correction object and "
+                        f"keep the score inside {mandatory_band}."
+                    ),
+                )
+                correction = correction_result["grounding_score_correction"]
+                parsed["grounding"]["score"] = correction["score"]
+                parsed["grounding"]["reason"] = correction["reason"]
+                parsed["grounding"]["strengths"] = correction.get("strengths", [])
+                parsed["grounding"]["recommendations"] = correction.get(
+                    "recommendations", []
+                )
+                normalized = _normalize_result(parsed, roadmap, normalized_contexts)
+                retried = True
+            if consistency_notes and retried:
+                normalized["grounding"]["normalization_notes"].append(
+                    "Applied a directed score correction after: "
+                    f"{str(retry_reason).rstrip('.')}."
+                )
+            elif retried:
+                normalized["grounding"]["normalization_notes"].append(
+                    f"Retried once after an invalid response: {str(retry_reason).rstrip('.')}."
+                )
+            normalized["grounding"]["judge_execution"] = {
+                "attempt_count": 2 if retried else 1,
+                "recovered": retried and not normalized["grounding"].get(
+                    "manual_review_required", False
+                ),
+                "retry_reason": retry_reason or None,
+            }
+            if consistency_notes and retried and "correction_trace" in locals():
+                normalized["grounding"]["judge_execution"][
+                    "score_correction"
+                ] = correction_trace
             return normalized
         except Exception as exc:
             return _fallback_result(roadmap, exc)
