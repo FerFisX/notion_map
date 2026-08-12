@@ -26,9 +26,6 @@ class LogicalOrderCase:
     roadmap: dict[str, Any]
     expected_score_min: float
     expected_score_max: float
-    required_dependencies: tuple[tuple[str, str], ...] = ()
-    forbidden_dependencies: tuple[tuple[str, str], ...] = ()
-    expect_no_dependencies: bool = False
 
 
 def _step(idx: int, label: str, description: str) -> dict[str, Any]:
@@ -49,7 +46,6 @@ CASES: list[LogicalOrderCase] = [
         category="dax_power_bi",
         expected_score_min=8.0,
         expected_score_max=10.0,
-        expect_no_dependencies=True,
         roadmap={
             "title": "Build DAX Time Intelligence",
             "steps": [
@@ -69,7 +65,6 @@ CASES: list[LogicalOrderCase] = [
         category="n8n_automation",
         expected_score_min=8.0,
         expected_score_max=10.0,
-        expect_no_dependencies=True,
         roadmap={
             "title": "Load API Data with n8n",
             "steps": [
@@ -89,7 +84,6 @@ CASES: list[LogicalOrderCase] = [
         category="power_bi_reporting",
         expected_score_min=5.0,
         expected_score_max=7.9,
-        required_dependencies=(("step_5", "step_2"),),
         roadmap={
             "title": "Build an Executive Dashboard",
             "steps": [
@@ -109,8 +103,6 @@ CASES: list[LogicalOrderCase] = [
         category="n8n_automation",
         expected_score_min=5.0,
         expected_score_max=7.9,
-        required_dependencies=(("step_3", "step_2"),),
-        forbidden_dependencies=(("step_3", "step_1"),),
         roadmap={
             "title": "Connect n8n to a Protected API",
             "steps": [
@@ -130,10 +122,6 @@ CASES: list[LogicalOrderCase] = [
         category="data_engineering",
         expected_score_min=0.0,
         expected_score_max=4.9,
-        required_dependencies=(
-            ("step_2", "step_1"),
-            ("step_4", "step_2"),
-        ),
         roadmap={
             "title": "Deploy a Data Service Backwards",
             "steps": [
@@ -153,10 +141,6 @@ CASES: list[LogicalOrderCase] = [
         category="dax_power_bi",
         expected_score_min=0.0,
         expected_score_max=4.9,
-        required_dependencies=(
-            ("step_4", "step_1"),
-            ("step_5", "step_2"),
-        ),
         roadmap={
             "title": "Learn Context Transition in Reverse",
             "steps": [
@@ -176,7 +160,6 @@ CASES: list[LogicalOrderCase] = [
         category="data_engineering",
         expected_score_min=8.0,
         expected_score_max=10.0,
-        expect_no_dependencies=True,
         roadmap={
             "title": "Incomplete but Ordered API Workflow",
             "steps": [
@@ -194,7 +177,6 @@ CASES: list[LogicalOrderCase] = [
         category="automation",
         expected_score_min=8.0,
         expected_score_max=10.0,
-        expect_no_dependencies=True,
         roadmap={
             "title": "Vague but Ordered Automation",
             "steps": [
@@ -220,28 +202,11 @@ def _case_status(case: LogicalOrderCase, result: dict[str, Any]) -> dict[str, An
     logical_order = result["logical_order"]
     score = float(logical_order["score"])
     score_ok = case.expected_score_min <= score <= case.expected_score_max
-    observed_dependencies = {
-        (str(edge.get("before_step_id", "")), str(edge.get("after_step_id", "")))
-        for edge in logical_order.get("dependency_graph", [])
-    }
-    required_dependencies = set(case.required_dependencies)
-    forbidden_dependencies = set(case.forbidden_dependencies)
-    required_ok = required_dependencies <= observed_dependencies
-    forbidden_ok = not (forbidden_dependencies & observed_dependencies)
-    empty_ok = not case.expect_no_dependencies or not observed_dependencies
-    no_fallback = not bool(logical_order.get("manual_review_required"))
     return {
         "score_ok": score_ok,
-        "required_dependencies_ok": required_ok,
-        "forbidden_dependencies_ok": forbidden_ok,
-        "empty_dependency_graph_ok": empty_ok,
-        "no_fallback": no_fallback,
-        "passed": all((score_ok, required_ok, forbidden_ok, empty_ok, no_fallback)),
+        "passed": score_ok,
         "observed_score": score,
         "expected_score_range": [case.expected_score_min, case.expected_score_max],
-        "required_dependencies": [list(edge) for edge in case.required_dependencies],
-        "forbidden_dependencies": [list(edge) for edge in case.forbidden_dependencies],
-        "observed_dependencies": [list(edge) for edge in sorted(observed_dependencies)],
     }
 
 

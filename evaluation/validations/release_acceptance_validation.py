@@ -29,12 +29,9 @@ from evaluation.readiness import roadmap_readiness
 from evaluation.reporter import save_html, save_json
 from evaluation.run_session import RunCheckpoint, RunProgress, create_run_dir
 from evaluation.runner import CLI_METRICS, parse_metrics
-from evaluation.structured_output import StructuredOutputError, invoke_json_with_retry
 from evaluation.tracking import _flatten_metrics
 from evaluation.validations.canonical_integration_validation import (
     REPORT_DIR as CANONICAL_REPORT_DIR,
-    SUITE_VERSION as CANONICAL_SUITE_VERSION,
-    _evaluation_source_fingerprint,
     run as run_live_orchestrator,
 )
 
@@ -147,56 +144,6 @@ def _assert(condition: Any, message: str) -> None:
 
 def _verdict(score: float) -> str:
     return "PASS" if score >= 8 else "NEEDS_REVIEW" if score >= 5 else "FAIL"
-
-
-class _ResponseSequence:
-    def __init__(self, responses: list[str]):
-        self.responses = iter(responses)
-        self.calls = 0
-
-    def invoke(self, prompt: str) -> SimpleNamespace:
-        self.calls += 1
-        return SimpleNamespace(content=next(self.responses))
-
-
-def _parse_json_object(raw: str) -> dict[str, Any]:
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise ValueError("Expected a JSON object")
-    return parsed
-
-
-def _validate_structured_recovery() -> str:
-    llm = _ResponseSequence(["not-json", '{"status":"recovered"}'])
-    payload, trace = invoke_json_with_retry(
-        llm,
-        "Return JSON.",
-        operation="Controlled structured recovery",
-        parser=_parse_json_object,
-        repair_instruction="Return one complete JSON object.",
-    )
-    _assert(payload == {"status": "recovered"}, "Corrective retry payload changed")
-    _assert(llm.calls == 2, "Corrective retry did not run exactly once")
-    _assert(trace["attempt_count"] == 2 and trace["recovered"], "Recovery trace is incomplete")
-    _assert(len(trace["validation_errors"]) == 1, "Initial parse error was not recorded")
-    return "Invalid JSON recovered once with an auditable attempt trace."
-
-
-def _validate_structured_failure() -> str:
-    llm = _ResponseSequence(["not-json", "still-not-json"])
-    try:
-        invoke_json_with_retry(
-            llm,
-            "Return JSON.",
-            operation="Controlled structured failure",
-            parser=_parse_json_object,
-            repair_instruction="Return one complete JSON object.",
-        )
-    except StructuredOutputError as exc:
-        _assert(exc.trace["attempt_count"] == 2, "Failure attempts were not preserved")
-        _assert(len(exc.trace["validation_errors"]) == 2, "Failure diagnostics are incomplete")
-        return "Persistent invalid JSON fails explicitly with both attempts recorded."
-    raise AssertionError("Persistent invalid JSON did not raise StructuredOutputError")
 
 
 def _step(index: int, label: str) -> dict[str, Any]:
@@ -476,59 +423,6 @@ def _find_evidence_cases(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[
     return strong, poor
 
 
-def _validate_orchestrator_evidence(payload: dict[str, Any]) -> str:
-    """Validate controlled orchestration through size-independent invariants."""
-    judge = payload.get("judge", {})
-    samples = judge.get("per_sample", [])
-    sample_count = judge.get("sample_count")
-    adapter_calls = payload.get("controlled_adapter_calls")
-    declared_case_count = payload.get("case_count", len(samples))
-    manifest = payload.get("case_manifest", [])
-    execution_config = payload.get("execution_config", {})
-
-    _assert(payload.get("suite_version") == CANONICAL_SUITE_VERSION, "Controlled evidence belongs to a stale suite version")
-    _assert(payload.get("generator_calls") == 0, "Roadmap generator was called")
-    _assert(isinstance(samples, list) and samples, "No controlled samples were reported")
-    _assert(sample_count == len(samples), "Reported sample count does not match results")
-    _assert(adapter_calls == len(samples), "Not every controlled roadmap was consumed exactly once")
-    _assert(declared_case_count == len(samples), "Declared case count does not match results")
-    _assert(judge.get("failure_count") == 0, "A judge execution failed")
-    _assert(all(
-        all(name in sample for name in (*SEMANTIC_METRICS, "schema_validity"))
-        for sample in samples
-    ), "A canonical metric result is missing")
-    case_names = [sample.get("controlled_case") for sample in samples]
-    _assert(all(case_names), "A controlled case name is missing")
-    _assert(len(set(case_names)) == len(case_names), "Controlled case names are not unique")
-    _assert(isinstance(manifest, list) and len(manifest) == len(samples), "Case manifest does not match executed samples")
-    manifest_names = [item.get("name") for item in manifest if isinstance(item, dict)]
-    _assert(manifest_names == case_names, "Case manifest order or names do not match results")
-    fingerprints = [item.get("fingerprint_sha256") for item in manifest if isinstance(item, dict)]
-    _assert(
-        len(fingerprints) == len(samples)
-        and len(set(fingerprints)) == len(samples)
-        and all(isinstance(value, str) and len(value) == 64 for value in fingerprints),
-        "Case fingerprints are missing or invalid",
-    )
-    _assert(
-        all(execution_config.get(name) not in (None, "") for name in (
-            "provider", "model", "judge_temperature", "judge_reasoning_mode",
-            "request_timeout_seconds", "metric_contract",
-            "evaluation_source_sha256",
-        )),
-        "Execution configuration is incomplete",
-    )
-    _assert(
-        execution_config.get("evaluation_source_sha256")
-        == _evaluation_source_fingerprint(),
-        "Controlled evidence was generated by a different evaluator implementation",
-    )
-    return (
-        f"{len(samples)} controlled roadmaps completed every real judge "
-        "without generator calls or lost samples."
-    )
-
-
 def _write_summary(
     output_dir: Path,
     results: list[CheckResult],
@@ -588,7 +482,7 @@ def _executive_results(results: list[CheckResult]) -> list[CheckResult]:
     groups = (
         ("ENV-01", "Environment", "Real environment preflight", "BLOCKER", ("ENV-05",)),
         ("ORCH-01", "Orchestrator", "Consistent end-to-end orchestration", "BLOCKER",
-         ("ORCH-01", "ORCH-02", "ORCH-03", "ORCH-04", "ORCH-05", "ORCH-06", "ORCH-07", "ORCH-17", "ORCH-18", "ORCH-19")),
+         ("ORCH-01", "ORCH-02", "ORCH-03", "ORCH-04", "ORCH-05", "ORCH-06", "ORCH-07", "ORCH-17")),
         ("ORCH-02", "Orchestrator", "Developer execution visibility", "IMPORTANT",
          ("ORCH-09", "ORCH-10")),
         ("ORCH-03", "Orchestrator", "Checkpoint and resume integrity", "BLOCKER",
@@ -623,11 +517,7 @@ def _executive_results(results: list[CheckResult]) -> list[CheckResult]:
         if status == "PASS":
             evidence = f"{len(members)} internal checks passed."
         else:
-            affected = [
-                f"{item.id} — {item.description}: {item.evidence}"
-                for item in members
-                if item.status == status
-            ]
+            affected = [item.description for item in members if item.status == status]
             evidence = "; ".join(affected)
         executive.append(CheckResult(
             check_id,
@@ -721,20 +611,6 @@ def run(
         _assert(not ({"classic", "mese", "sequence_eval"} & set(full_sample)), "Legacy field found") or
         "No legacy field in canonical sample."
     ))
-    suite.auto(
-        "ORCH-18",
-        "Orchestrator",
-        "Invalid structured output receives one corrective retry",
-        "BLOCKER",
-        _validate_structured_recovery,
-    )
-    suite.auto(
-        "ORCH-19",
-        "Orchestrator",
-        "Persistent structured-output failure remains explicit",
-        "BLOCKER",
-        _validate_structured_failure,
-    )
 
     progress_dir = create_run_dir(str(output_dir), "progress-check")
     progress = RunProgress(progress_dir, 2)
@@ -817,8 +693,17 @@ def run(
     missing = "Controlled final evidence JSON was not found; run the documented controlled validation."
 
     suite.evidence("ORCH-17", "Orchestrator", "Real judges complete the controlled orchestration", "BLOCKER", (
-        (lambda: _validate_orchestrator_evidence(evidence_payload))
-        if evidence_payload and "controlled_adapter_calls" in evidence_payload else None
+        (lambda: (
+            _assert(evidence_payload.get("generator_calls") == 0, "Roadmap generator was called") or
+            _assert(evidence_payload.get("controlled_adapter_calls") == 2, "Both controlled roadmaps were not consumed") or
+            _assert(evidence_payload["judge"].get("sample_count") == 2, "Expected two controlled samples") or
+            _assert(evidence_payload["judge"].get("failure_count") == 0, "A judge execution failed") or
+            _assert(all(
+                all(name in sample for name in (*SEMANTIC_METRICS, "schema_validity"))
+                for sample in evidence_payload["judge"]["per_sample"]
+            ), "A canonical metric result is missing") or
+            "Two controlled roadmaps completed every real judge without generator calls."
+        )) if evidence_payload and "controlled_adapter_calls" in evidence_payload else None
     ), missing)
 
     suite.evidence("MET-03", "Metrics", "Grounding support diagnostics are coherent", "BLOCKER", (

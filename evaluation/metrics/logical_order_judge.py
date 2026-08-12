@@ -1,20 +1,260 @@
-"""Hybrid semantic and deterministic evaluator for roadmap logical order.
+"""LLM-based semantic judge for roadmap logical order.
 
-The LLM first proposes only dependencies that appear inverted in the current
-sequence, with targeted recovery for omitted steps. A second evidence-backed
-semantic pass audits those candidates. Deterministic code then builds a stable
-valid order and measures the minimum repair scope. The LLM assigns the
-human-facing score inside that computed band.
+Logical Order evaluates dependency correctness only. It intentionally avoids
+scoring completeness, grounding, actionability, step distinctness, schema
+validity, or the roadmap's broader narrative flow.
 """
 
 from __future__ import annotations
 
-import heapq
 import json
 from typing import Any
 
-from evaluation.structured_output import StructuredOutputError, invoke_json_with_retry
-from src.llm_provider import get_judge_llm
+from src.llm_provider import get_judge_llm, invoke_llm_text
+
+
+_PROMPT_TEMPLATE = """\
+You are an expert evaluator of technical learning and execution roadmaps.
+Return ONLY valid JSON. Do not use markdown or extra text.
+
+USER QUESTION
+{question}
+
+CATEGORY
+{category}
+
+ROADMAP JSON
+{roadmap}
+
+CURRENT STEP POSITIONS
+Lower positions execute before higher positions.
+{current_order}
+
+TASK
+Evaluate LOGICAL ORDER only.
+
+Logical Order asks whether the current sequence respects prerequisites, causal
+dependencies, learning progression, and the timing of validation activities.
+
+Evaluate exactly these four criteria:
+
+1. Prerequisite order
+   - Are required concepts, tools, credentials, inputs, or foundations
+     introduced before a step depends on them?
+
+2. Causal dependency order
+   - Is an output created before another step consumes, transforms, tests, or
+     publishes it?
+
+3. Learning or execution progression
+   - Does the sequence move from necessary foundations to application without
+     requiring knowledge or state that only appears later?
+
+4. Validation timing
+   - Do testing, verification, monitoring, or final review steps occur after
+     the result they validate exists?
+
+SCORING PROCESS
+Follow this order. Do not score before completing the dependency analysis.
+1. Read the CURRENT STEP ORDER and map every step ID to its current position.
+2. Identify only valid dependency violations.
+3. Build the smallest correction plan that repairs all valid violations.
+   Count independent step movements, not every dependency relationship restored
+   by the same movement.
+4. Determine the repair scope: no repair, one local repair, or structural
+   reordering.
+5. Select the score band from the repair scope.
+6. Choose a numeric score inside that band.
+7. Verify that the final score, criterion scores, reason, violations, and
+   suggested order all describe the same result.
+
+FINAL SCORE BANDS
+- 8.0-10.0 — no repair required:
+  No meaningful dependency violation exists. Independent steps may appear in
+  any reasonable order. dependency_violations must be empty and
+  suggested_order must equal CURRENT STEP ORDER.
+- 5.0-7.9 — one local repair:
+  One isolated or moderate dependency reversal exists, but moving one step or
+  making one localized reorder repairs the sequence. This remains a local
+  repair even when the misplaced step must move across several positions or
+  that one move restores several related dependencies.
+- 0.0-4.9 — structural reordering required:
+  Two or more independent step movements, multiple unrelated root ordering
+  defects, or a broadly reversed workflow requires substantial reordering.
+
+The final score is NOT an average of the four criterion scores. Its band must
+represent the most severe valid ordering defect and the scope of repair.
+
+ONE-MOVE INVARIANT
+Compare CURRENT STEP ORDER with suggested_order before selecting the score.
+If suggested_order can be obtained by removing one existing step and inserting
+that same step at another position while every other step keeps its relative
+order, the correction is exactly one local repair. In that situation:
+- score MUST be 5.0-7.9;
+- the root violation severity MUST be low or medium, never high;
+- do not classify the roadmap as structural reordering, regardless of how
+  important the misplaced step is or how many positions it crosses.
+The 0.0-4.9 band is allowed only when the correction cannot be achieved with
+one such relocation because at least two independent movements are necessary
+or the workflow is broadly reversed.
+
+DEPENDENCY VIOLATIONS
+Report only meaningful order problems. A stylistic preference is not a causal
+dependency.
+
+Report the minimal set of root ordering defects, not every downstream
+consequence of the same misplaced step. When one step is too early or too late
+relative to several steps and moving that single step to one position repairs
+all relationships, report one representative root violation and classify the
+roadmap as one local repair. Do not turn that one correction into separate
+prerequisite, causal-output, learning-progression, and validation-timing
+violations.
+
+For every violation identify:
+- dependent_step_id: the step currently placed too early;
+- required_predecessor_step_id: the later step that must occur first;
+- dependency_type:
+  prerequisite | causal_output | learning_progression | validation_timing;
+- severity: low | medium | high;
+- explanation: why the dependent step requires the predecessor;
+- suggested_fix: how to reorder the affected steps.
+
+Use exact step IDs from the roadmap. Do not use labels in ID fields.
+
+POSITION INVARIANT
+A reported violation means the required predecessor is currently AFTER the
+dependent step. In the current roadmap positions must satisfy:
+
+  position(required_predecessor_step_id) > position(dependent_step_id)
+
+Never report a pair when the required predecessor is already before the
+dependent step. Before returning JSON, verify this invariant for every pair.
+Example: if step_2 tries to use something created by the later step_3, report
+dependent_step_id="step_2" and required_predecessor_step_id="step_3". The
+corrected suggested order must then place step_3 before step_2.
+
+SEVERITY CALIBRATION
+Severity measures the breadth of the ordering defect and the complexity of
+repair, not merely whether the dependent step can execute at its current
+position.
+- low: a minor ordering weakness with limited practical impact;
+- medium: one isolated dependency reversal that a local move can repair;
+- high: multiple independent root defects or a broadly reversed workflow that
+  requires at least two independent movements and cannot be described as one
+  isolated local correction.
+Do not label a single adjacent prerequisite reversal as high solely because
+the dependent step would fail before the move.
+Do not label any single-step relocation as high solely because it restores
+multiple prerequisites or moves across several positions.
+
+REPAIR-SCOPE EXAMPLES
+- A credential step placed immediately after the request that needs it is one
+  local repair: move the credential before the request. Use 5.0-7.9.
+- A validation step placed before the model, measures, and final artifact is
+  one local repair when moving that validation step after the artifact repairs
+  the entire sequence. Use 5.0-7.9 and report one validation-timing root defect.
+- A roadmap with both a misplaced foundation and an independently misplaced
+  deployment or validation step requires multiple movements. Use 0.0-4.9.
+
+CRITERION SEPARATION
+Assign each root ordering defect to its most specific primary criterion. Do
+not penalize multiple criteria for the same causal fact unless independent
+evidence supports each penalty.
+- Missing credentials before an authenticated request primarily affects
+  prerequisite_order.
+- Testing an artifact before it exists primarily affects validation_timing.
+- An output consumed before it is produced primarily affects
+  causal_dependency_order.
+- Advanced practice before required foundational learning primarily affects
+  learning_progression.
+Unrelated criteria should remain high when their own ordering logic is valid.
+For one isolated root defect, score its primary criterion below 8.0 and keep
+the other criteria between 8.0 and 10.0 unless you identify separate evidence
+of another independent ordering defect.
+
+If the order is valid:
+- dependency_violations must be [];
+- suggested_order must reproduce the current step ID order.
+
+If the order is invalid, suggested_order must contain every step ID exactly
+once in a corrected order. Every change in suggested_order must be supported
+by at least one dependency_violations entry. Never return an empty violations
+list together with a reordered suggested_order.
+
+GUARDRAILS AGAINST METRIC OVERLAP
+Do NOT lower Logical Order because:
+- a necessary step is missing; that belongs to Completeness;
+- a step is vague or difficult to execute; that belongs to Actionability;
+- a claim lacks contextual support; that belongs to Grounding;
+- two steps overlap; that belongs to Step Distinctness;
+- framing, closure, granularity, or navigation is weak; that belongs to
+  Structure Quality;
+- the JSON contract is invalid; that belongs to Schema Validity.
+
+An incomplete, vague, unsupported, or repetitive roadmap can still have a
+correct relative order among the steps that are present.
+Do not require an additional validation, monitoring, review, or completion
+step. If testing happens after the result exists and release happens after
+testing, validation timing is correct. Missing additional coverage belongs to
+Completeness, not Logical Order.
+
+CRITERION AND SCORE CONSISTENCY
+Before returning JSON, verify all of the following:
+- score 8.0-10.0 means no meaningful dependency violation remains and
+  suggested_order is identical to the current order;
+- score 5.0-7.9 means one isolated or moderate violation exists and the
+  suggested order repairs it locally;
+- score 0.0-4.9 means multiple independent root defects or a broadly reversed
+  workflow requires at least two independent movements;
+- every reported predecessor is currently after its dependent step and appears
+  before that dependent step in suggested_order;
+- dependency_type uses exactly one of the allowed values;
+- a prerequisite violation prevents prerequisite_order from scoring 8.0 or
+  higher;
+- a causal-output violation prevents causal_dependency_order from scoring 8.0
+  or higher;
+- a learning-progression violation prevents learning_progression from scoring
+  8.0 or higher;
+- a validation-timing violation prevents validation_timing from scoring 8.0 or
+  higher;
+- multiple independent root defects or a high-severity structural failure
+  require a final score below 5.0;
+- the overall reason, criterion scores, violations, and suggested order support
+  the same score band.
+Do not return JSON until these conditions are internally consistent.
+
+Expected JSON schema:
+{{
+  "logical_order": {{
+    "dependency_violations": [
+      {{
+        "dependent_step_id": "<exact step ID>",
+        "required_predecessor_step_id": "<exact step ID>",
+        "dependency_type": "prerequisite|causal_output|learning_progression|validation_timing",
+        "severity": "low|medium|high",
+        "explanation": "<why the current order is invalid>",
+        "suggested_fix": "<specific reordering recommendation>"
+      }}
+    ],
+    "suggested_order": ["<step ID>", "<step ID>"],
+    "criteria": {{
+      "prerequisite_order": <0-10>,
+      "causal_dependency_order": <0-10>,
+      "learning_progression": <0-10>,
+      "validation_timing": <0-10>
+    }},
+    "criteria_rationales": {{
+      "prerequisite_order": "<case-specific rationale>",
+      "causal_dependency_order": "<case-specific rationale>",
+      "learning_progression": "<case-specific rationale>",
+      "validation_timing": "<case-specific rationale>"
+    }},
+    "score": <0-10, choose only after completing all fields above>,
+    "reason": "<short explanation supporting the final score band>",
+    "recommendations": ["<recommendation>", "..."]
+  }}
+}}
+"""
 
 
 _CRITERIA = (
@@ -29,272 +269,13 @@ _DEPENDENCY_TYPES = {
     "learning_progression",
     "validation_timing",
 }
-
-
-_DEPENDENCY_PROMPT = """\
-You are a semantic dependency analyst for technical learning and execution
-roadmaps. Return ONLY valid JSON, with no markdown or additional text.
-
-USER QUESTION
-{question}
-
-CATEGORY
-{category}
-
-ORDER-RELEVANT REFERENCE CONTEXT
-Use this evidence to resolve technical prerequisites and lifecycle order. Do
-not score factual support or missing content here.
-{contexts}
-
-CURRENT ROADMAP ORDER
-Lower positions execute before higher positions.
-{ordered_steps}
-
-TASK
-Audit every current step exactly once. For each step, ask whether it requires a
-concrete artifact, state, input, configuration, or knowledge that is produced
-by a LATER step. Include that later dependency only when the current step
-cannot validly produce its stated result without it. Return an empty
-later_dependencies list for a step with no strict inversion.
-
-Fields have fixed positional meanings: step_id is the EARLIER step being
-audited; required_predecessor_step_id is the LATER step that must move before
-it.
-
-Do not report dependencies that are already satisfied. Do not report stylistic
-preferences, missing content, vague instructions, unsupported claims, repeated
-work, framing, closure, granularity, or schema defects.
-
-Direction guardrails:
-- defining a goal or contract normally precedes receiving runtime data;
-- creation or implementation precedes its use, publication, delivery, or test;
-- validation observes an existing result; the result does not require its
-  later validation in order to be created;
-- quality assurance before assembly is a best practice, not a strict logical
-  dependency: building a page or workflow does not require prior validation
-  unless that step explicitly consumes an approved status;
-- error handling supports an operation but does not normally need to precede
-  implementation of the core operation;
-- preparation, credentials, data models, and base artifacts precede work that
-  consumes them;
-- identifying or defining an endpoint, destination, requirement, or target is
-  planning work and does not require runtime credentials; credentials precede
-  the later operation that actually accesses the protected service;
-- validation precedes production activation when activation claims a tested
-  result.
-
-If a description says it publishes, validates, activates, or consumes something
-before that thing exists, treat that wording as evidence of an inversion. Do
-not preserve the flawed timing described by the roadmap.
-
-EXPLICIT PREMATURITY CHECK
-Pay special attention when a step says it acts "before" another artifact
-exists, performs work "immediately" without its setup, or deliberately defers
-required preparation until "later" or "last". Locate the later roadmap step
-that creates the named requirement and report it in the audited step's
-later_dependencies. Do not treat the premature wording as a valid sequence.
-For every validation, test, review, publication, or activation step, identify
-the roadmap step that creates the exact result being checked or released. If
-that creator appears later, report the direct dependency even when another
-foundation dependency has already been reported.
-
-Allowed dependency types:
-prerequisite | causal_output | learning_progression | validation_timing
-
-Rules:
-- Use exact step IDs from CURRENT ROADMAP ORDER.
-- Return exactly one audit entry for every step ID, in current order.
-- required_predecessor_step_id must have a numerically higher position than
-  the audited step_id in every returned dependency.
-- Return every independently required direct later dependency, while omitting
-  only duplicate or purely transitive edges. Do not let one foundation edge
-  hide a separate creation-before-use or creation-before-validation edge.
-- Return no more than {max_edges} direct candidates.
-- Keep explanations under 30 words and name the concrete missing prerequisite.
-- The final step must normally have an empty later_dependencies list because
-  no later roadmap step exists.
-
-Expected JSON schema:
-{{
-  "inverted_dependency_audit": [
-    {{
-      "step_id": "<exact audited step ID>",
-      "later_dependencies": [
-        {{
-          "required_predecessor_step_id": "<later exact step ID>",
-          "dependency_type": "prerequisite|causal_output|learning_progression|validation_timing",
-          "explanation": "<what the audited step lacks from the later step>"
-        }}
-      ]
-    }}
-  ]
-}}
-"""
-
-
-_MISSING_DEPENDENCY_PROMPT = """\
-You are completing a partial semantic dependency audit. Return ONLY valid JSON,
-with no markdown or additional text.
-
-USER QUESTION
-{question}
-
-ORDER-RELEVANT REFERENCE CONTEXT
-{contexts}
-
-COMPLETE ROADMAP ORDER
-{ordered_steps}
-
-STEPS STILL MISSING FROM THE AUDIT
-{missing_step_ids}
-
-Audit only the missing step IDs above. For each missing step, report later
-roadmap steps that must move before it because they create a concrete artifact,
-state, input, configuration, or knowledge that it strictly requires. Use an
-empty later_dependencies list when no strict inversion exists.
-
-Return exactly one entry for each missing ID and no entries for other steps:
-{{
-  "inverted_dependency_audit": [
-    {{
-      "step_id": "<exact missing step ID>",
-      "later_dependencies": [
-        {{
-          "required_predecessor_step_id": "<later exact step ID>",
-          "dependency_type": "prerequisite|causal_output|learning_progression|validation_timing",
-          "explanation": "<concrete missing prerequisite>"
-        }}
-      ]
-    }}
-  ]
-}}
-"""
-
-
-_EDGE_AUDIT_PROMPT = """\
-You audit proposed ordering repairs for a technical roadmap. Return ONLY valid
-JSON, with no markdown or additional text.
-
-ROADMAP STEPS IN CURRENT ORDER
-{steps}
-
-ORDER-RELEVANT REFERENCE CONTEXT
-Use this evidence to resolve disputed prerequisites. Do not score Grounding or
-Completeness.
-{contexts}
-
-PROPOSED MOVEMENTS
-{candidate_edges}
-
-Each proposal has:
-- premature_step_id: an EARLIER step that may be acting too soon;
-- required_later_step_id: a LATER step that may need to move before it.
-
-For every proposal return one categorical verdict:
-- CONFIRMED_STRICT_INVERSION: the earlier step cannot validly produce its
-  stated result until the later step has occurred;
-- KEEP_CURRENT_ORDER: the proposal is false, reversed, merely preferable, or
-  the two steps are independent.
-
-Judge ordering only. An incomplete or incorrect required step can still need
-to occur first; its quality belongs to other metrics. Creation precedes use or
-validation. Setup precedes work that consumes it. Validation precedes
-production activation only when activation claims a tested or approved state.
-Do not let a roadmap erase an explicit lifecycle dependency by claiming that a
-consumer, cloud service, visual, or automatic feature will create, repair, or
-validate a prerequisite that the roadmap itself schedules later. When the
-roadmap includes a later step for that named prerequisite or output, evaluate
-the declared creation-before-use or creation-before-validation relationship.
-Defining a goal, desired outcome, scope, or contract normally precedes runtime
-data, credentials, and implementation; reject proposals that move those
-operational steps before framing. Credentials are prerequisites only for steps
-that actually access the protected service, not for planning or a local data
-transformation unless the roadmap explicitly performs that access there.
-Identifying or defining an endpoint, destination, requirement, or target is
-planning work: authentication must precede the actual protected request, not
-the prior identification of what will be accessed.
-In a learning roadmap, applying, practicing, building with, or optimizing a
-named concept strictly depends on an included later step that teaches or
-introduces that concept when the application step explicitly says it requires
-or depends on that knowledge. Verbatim descriptions declaring that dependency
-are direct roadmap evidence even when the two step labels use different words.
-
-EVIDENCE REQUIREMENT
-Return CONFIRMED_STRICT_INVERSION only with verifiable evidence:
-- roadmap evidence: copy one short verbatim quote from premature_step_id and
-  one from required_later_step_id. Together they must show use before creation,
-  validation before output, or another strict prerequisite relationship;
-- context evidence: copy one short verbatim quote from the reference context
-  that explicitly states the required order.
-Do not paraphrase quotes. Merely mentioning the same topic is insufficient. If
-no direct evidence exists, preserve the current relative order.
-
-Example: if step_2 publishes before step_6 prepares the data model, return
-CONFIRMED_STRICT_INVERSION because step_6 must move before step_2.
-
-Return exactly one decision for every edge_index:
-{{
-  "edge_audit": [
-    {{
-      "edge_index": <zero-based edge_index>,
-      "verdict": "CONFIRMED_STRICT_INVERSION|KEEP_CURRENT_ORDER",
-      "evidence_source": "roadmap|context|none",
-      "premature_step_quote": "<verbatim quote or empty string>",
-      "required_step_quote": "<verbatim quote or empty string>",
-      "context_quote": "<verbatim context quote or empty string>",
-      "reason": "<brief case-specific reason>"
-    }}
-  ]
-}}
-"""
-
-
-_FINAL_SCORING_PROMPT = """\
-You are an expert evaluator of roadmap Logical Order. Return ONLY valid JSON,
-with no markdown or additional text.
-
-USER QUESTION
-{question}
-
-CATEGORY
-{category}
-
-ROADMAP STEPS
-{steps}
-
-VALIDATED DETERMINISTIC ORDER EVIDENCE
-{analysis}
-
-The accepted semantic dependencies and deterministic repair scope above are
-final. Do not add, remove, or reinterpret them. Score only Logical Order and do
-not penalize completeness, actionability, grounding, overlap, structure, or
-schema quality.
-
-Choose a precise decimal final score inside the mandatory {score_band} band.
-Use the practical impact of the validated inversions to choose a value within
-that band. Provide metric-specific criterion scores and concise rationales.
-
-Expected JSON schema:
-{{
-  "logical_order_assessment": {{
-    "criteria": {{
-      "prerequisite_order": <0-10>,
-      "causal_dependency_order": <0-10>,
-      "learning_progression": <0-10>,
-      "validation_timing": <0-10>
-    }},
-    "criteria_rationales": {{
-      "prerequisite_order": "<case-specific rationale>",
-      "causal_dependency_order": "<case-specific rationale>",
-      "learning_progression": "<case-specific rationale>",
-      "validation_timing": "<case-specific rationale>"
-    }},
-    "score": <number in {score_band}>,
-    "reason": "<brief explanation>",
-    "recommendations": ["<supported reordering action>"]
-  }}
-}}
-"""
+_DEPENDENCY_TYPE_ALIASES = {
+    "prerequisite_order": "prerequisite",
+    "causal_dependency_order": "causal_output",
+    "learning_order": "learning_progression",
+    "validation_order": "validation_timing",
+}
+_SEVERITIES = {"low", "medium", "high"}
 
 
 def _strip_markdown_json(raw: str) -> str:
@@ -307,7 +288,7 @@ def _strip_markdown_json(raw: str) -> str:
     return text.strip()
 
 
-def _parse_json_object(raw: str) -> dict[str, Any]:
+def _parse_json_response(raw: str) -> dict[str, Any]:
     text = _strip_markdown_json(raw)
     try:
         parsed = json.loads(text)
@@ -318,18 +299,16 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
             raise
         parsed = json.loads(text[start:end + 1])
     if not isinstance(parsed, dict):
-        raise ValueError("Logical Order response must be a JSON object")
+        raise ValueError("Logical order response must be a JSON object")
     return parsed
 
 
 def _normalize_score(value: Any) -> float:
     try:
         score = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Score must be numeric") from exc
-    if not 0.0 <= score <= 10.0:
-        raise ValueError("Score must be between 0 and 10")
-    return round(score, 2)
+    except (TypeError, ValueError):
+        score = 0.0
+    return round(max(0.0, min(10.0, score)), 2)
 
 
 def _verdict(score: float) -> str:
@@ -348,382 +327,21 @@ def _score_band(score: float) -> str:
     return "0.0-4.9"
 
 
-def _band_for_scope(repair_scope: str) -> tuple[float, float, str]:
-    if repair_scope == "no_repair":
-        return 8.0, 10.0, "8.0-10.0"
-    if repair_scope == "local_repair":
-        return 5.0, 7.9, "5.0-7.9"
-    return 0.0, 4.9, "0.0-4.9"
-
-
-def _roadmap_steps(roadmap: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_steps = roadmap.get("steps", [])
-    if not isinstance(raw_steps, list):
-        raise ValueError("Roadmap steps must be a list")
-    steps = [step for step in raw_steps if isinstance(step, dict)]
-    step_ids = [str(step.get("id", "")).strip() for step in steps]
-    if not steps or any(not step_id for step_id in step_ids):
-        raise ValueError("Every roadmap step must have a non-empty ID")
-    if len(set(step_ids)) != len(step_ids):
-        raise ValueError("Roadmap step IDs must be unique for Logical Order")
-    return steps
-
-
-def _stable_topological_order(
-    step_ids: list[str],
-    edges: list[dict[str, str]],
-) -> list[str]:
-    positions = {step_id: index for index, step_id in enumerate(step_ids)}
-    successors = {step_id: set() for step_id in step_ids}
-    indegree = {step_id: 0 for step_id in step_ids}
-    for edge in edges:
-        before = edge["before_step_id"]
-        after = edge["after_step_id"]
-        if after not in successors[before]:
-            successors[before].add(after)
-            indegree[after] += 1
-
-    ready = [(positions[step_id], step_id) for step_id in step_ids if indegree[step_id] == 0]
-    heapq.heapify(ready)
-    ordered: list[str] = []
-    while ready:
-        _, step_id = heapq.heappop(ready)
-        ordered.append(step_id)
-        for successor in sorted(successors[step_id], key=positions.get):
-            indegree[successor] -= 1
-            if indegree[successor] == 0:
-                heapq.heappush(ready, (positions[successor], successor))
-    if len(ordered) != len(step_ids):
-        raise ValueError("Extracted semantic dependency graph contains a cycle")
-    return ordered
-
-
-def _minimum_relocations(current: list[str], target: list[str]) -> int:
-    """Return minimum remove-and-insert moves via longest common subsequence."""
-    width = len(target) + 1
-    previous = [0] * width
-    for current_id in current:
-        row = [0] * width
-        for index, target_id in enumerate(target, 1):
-            if current_id == target_id:
-                row[index] = previous[index - 1] + 1
-            else:
-                row[index] = max(previous[index], row[index - 1])
-        previous = row
-    return len(current) - previous[-1]
-
-
-def _parse_dependency_graph(
-    raw: str,
-    step_ids: list[str],
-    max_edges: int,
-    required_step_ids: list[str] | None = None,
-) -> dict[str, Any]:
-    parsed = _parse_json_object(raw)
-    audits = parsed.get("inverted_dependency_audit")
-    if not isinstance(audits, list):
-        raise ValueError("inverted_dependency_audit must be a list")
-
-    known_ids = set(step_ids)
-    required_ids = list(required_step_ids or step_ids)
-    required_set = set(required_ids)
-    if not required_set <= known_ids:
-        raise ValueError("Required dependency-audit IDs must belong to the roadmap")
-    positions = {step_id: index for index, step_id in enumerate(step_ids)}
-    edges: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    audited_ids: list[str] = []
-    for audit_index, audit in enumerate(audits, 1):
-        if not isinstance(audit, dict):
-            raise ValueError(f"Dependency audit {audit_index} must be an object")
-        dependent_id = str(audit.get("step_id", "")).strip()
-        if dependent_id not in known_ids:
-            raise ValueError(f"Dependency audit {audit_index} contains an unknown step ID")
-        if dependent_id not in required_set:
-            raise ValueError(
-                f"Dependency audit contains an unrequested step ID: {dependent_id}"
-            )
-        if dependent_id not in audited_ids:
-            audited_ids.append(dependent_id)
-        dependencies = audit.get("later_dependencies")
-        if not isinstance(dependencies, list):
-            raise ValueError(f"Dependency audit for {dependent_id} requires later_dependencies")
-        for dependency_index, item in enumerate(dependencies, 1):
-            if not isinstance(item, dict):
-                raise ValueError(
-                    f"Dependency {dependency_index} for {dependent_id} must be an object"
-                )
-            predecessor_id = str(
-                item.get("required_predecessor_step_id", "")
-            ).strip()
-            dependency_type = str(item.get("dependency_type", "")).strip().lower()
-            explanation = str(item.get("explanation", "")).strip()
-            if predecessor_id not in known_ids:
-                raise ValueError(
-                    f"Dependency for {dependent_id} contains an unknown predecessor ID"
-                )
-            if dependency_type not in _DEPENDENCY_TYPES:
-                raise ValueError(
-                    f"Dependency for {dependent_id} has an invalid dependency type"
-                )
-            if not explanation:
-                raise ValueError(f"Dependency for {dependent_id} requires an explanation")
-            if positions[predecessor_id] <= positions[dependent_id]:
-                continue
-            key = (predecessor_id, dependent_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            edges.append({
-                "before_step_id": predecessor_id,
-                "after_step_id": dependent_id,
-                "dependency_type": dependency_type,
-                "explanation": explanation,
-            })
-
-    missing = [step_id for step_id in required_ids if step_id not in audited_ids]
-    return {
-        "dependency_graph": {"edges": edges},
-        "audited_step_ids": audited_ids,
-        "missing_step_ids": missing,
-        "edge_limit_exceeded": len(edges) > max_edges,
-    }
-
-
-def _merge_dependency_edges(*groups: list[dict[str, str]]) -> list[dict[str, str]]:
-    merged: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for group in groups:
-        for edge in group:
-            key = (edge["before_step_id"], edge["after_step_id"])
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(edge)
-    return merged
-
-
-def _normalized_evidence(value: Any) -> str:
-    return " ".join(str(value).casefold().split())
-
-
-def _quote_in_text(quote: str, text: Any, minimum_words: int = 3) -> bool:
-    normalized_quote = _normalized_evidence(quote)
-    if len(normalized_quote.split()) < minimum_words:
-        return False
-    haystack = _normalized_evidence(text)
-    return normalized_quote in haystack
-
-
-def _movement_evidence_is_supported(
-    decision: dict[str, Any],
-    candidate: dict[str, str],
-    roadmap: dict[str, Any],
-    contexts: list[str],
-) -> bool:
-    source = str(decision.get("evidence_source", "")).strip().lower()
-    if source == "context":
-        return _quote_in_text(
-            str(decision.get("context_quote", "")),
-            json.dumps(contexts, ensure_ascii=False),
-            minimum_words=4,
-        )
-    if source != "roadmap":
-        return False
-    by_id = {
-        str(step.get("id", "")).strip(): json.dumps(step, ensure_ascii=False)
-        for step in roadmap.get("steps", [])
-        if isinstance(step, dict)
-    }
-    premature_id = candidate["after_step_id"]
-    required_id = candidate["before_step_id"]
-    premature_quote = str(decision.get("premature_step_quote", ""))
-    required_quote = str(decision.get("required_step_quote", ""))
-    quotes_are_verbatim = _quote_in_text(
-        premature_quote,
-        by_id.get(premature_id, ""),
-    ) and _quote_in_text(
-        required_quote,
-        by_id.get(required_id, ""),
-    )
-    return quotes_are_verbatim
-
-
-def _analyze_order(step_ids: list[str], edges: list[dict[str, str]]) -> dict[str, Any]:
-    positions = {step_id: index for index, step_id in enumerate(step_ids)}
-    suggested_order = _stable_topological_order(step_ids, edges)
-    inverted_edges = [
-        edge for edge in edges
-        if positions[edge["before_step_id"]] > positions[edge["after_step_id"]]
+def _roadmap_step_ids(roadmap: dict[str, Any]) -> list[str]:
+    steps = roadmap.get("steps", [])
+    if not isinstance(steps, list):
+        return []
+    return [
+        str(step.get("id", "")).strip()
+        for step in steps
+        if isinstance(step, dict) and str(step.get("id", "")).strip()
     ]
-    movement_count = (
-        _minimum_relocations(step_ids, suggested_order) if inverted_edges else 0
-    )
-    if movement_count == 0:
-        repair_scope = "no_repair"
-    elif movement_count == 1:
-        repair_scope = "local_repair"
-    else:
-        repair_scope = "structural_reordering"
-
-    severity = "high" if repair_scope == "structural_reordering" else "medium"
-    violations = [
-        {
-            "dependent_step_id": edge["after_step_id"],
-            "required_predecessor_step_id": edge["before_step_id"],
-            "dependency_type": edge["dependency_type"],
-            "severity": severity,
-            "explanation": edge["explanation"],
-            "suggested_fix": (
-                f"Move {edge['before_step_id']} before {edge['after_step_id']}."
-            ),
-        }
-        for edge in inverted_edges
-    ]
-    return {
-        "current_order": step_ids,
-        "suggested_order": suggested_order if inverted_edges else list(step_ids),
-        "dependency_edge_count": len(edges),
-        "dependency_violation_count": len(violations),
-        "dependency_violations": violations,
-        "movement_count": movement_count,
-        "repair_scope": repair_scope,
-    }
 
 
-def _parse_edge_audit(
-    raw: str,
-    step_ids: list[str],
-    candidate_edges: list[dict[str, str]],
-    roadmap: dict[str, Any],
-    contexts: list[str],
-) -> dict[str, Any]:
-    parsed = _parse_json_object(raw)
-    edge_audit = parsed.get("edge_audit")
-    if not isinstance(edge_audit, list):
-        raise ValueError("edge_audit must be a list")
-    accepted_indices: list[int] = []
-    audited_indices: list[int] = []
-    for decision in edge_audit:
-        if not isinstance(decision, dict):
-            raise ValueError("Every edge_audit decision must be an object")
-        value = decision.get("edge_index")
-        if isinstance(value, bool):
-            raise ValueError("edge_audit edge_index must be an integer")
-        try:
-            index = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("edge_audit edge_index must be an integer") from exc
-        if index < 0 or index >= len(candidate_edges):
-            raise ValueError(f"Unknown edge_audit index: {index}")
-        if index in audited_indices:
-            raise ValueError(f"Duplicate edge_audit index: {index}")
-        audited_indices.append(index)
-        candidate = candidate_edges[index]
-        verdict = str(decision.get("verdict", "")).strip().upper()
-        if not str(decision.get("reason", "")).strip():
-            raise ValueError(f"edge_audit {index} requires a reason")
-        if verdict not in {"CONFIRMED_STRICT_INVERSION", "KEEP_CURRENT_ORDER"}:
-            # A malformed decision must not discard valid decisions for every
-            # other candidate. Conservatively preserve the current order and
-            # expose the rejected value for diagnostics.
-            decision["original_verdict"] = decision.get("verdict")
-            decision["verdict"] = "KEEP_CURRENT_ORDER"
-            decision["decision"] = "keep_current_relative_order"
-            decision["evidence_verified"] = False
-            decision["reason"] = (
-                "Rejected automatically because the auditor did not return a "
-                "permitted categorical verdict."
-            )
-            continue
-        if verdict == "CONFIRMED_STRICT_INVERSION":
-            if _movement_evidence_is_supported(
-                decision, candidate, roadmap, contexts
-            ):
-                decision["decision"] = "move_required_step_before_premature_step"
-                decision["evidence_verified"] = True
-                accepted_indices.append(index)
-            else:
-                decision["original_verdict"] = verdict
-                decision["verdict"] = "KEEP_CURRENT_ORDER"
-                decision["decision"] = "keep_current_relative_order"
-                decision["evidence_verified"] = False
-                decision["reason"] = (
-                    "Rejected automatically because the proposed movement lacked "
-                    "a verifiable roadmap or context quote."
-                )
-        else:
-            decision["decision"] = "keep_current_relative_order"
-            decision["evidence_verified"] = None
-    if sorted(audited_indices) != list(range(len(candidate_edges))):
-        raise ValueError("edge_audit must decide every candidate edge exactly once")
-    accepted_edges = [candidate_edges[index] for index in accepted_indices]
-    analysis = _analyze_order(step_ids, accepted_edges)
-    return {
-        "edge_audit": edge_audit,
-        "accepted_dependency_graph": accepted_edges,
-        "deterministic_analysis": analysis,
-    }
-
-
-def _parse_final_scoring(raw: str, repair_scope: str) -> dict[str, Any]:
-    parsed = _parse_json_object(raw)
-    assessment = parsed.get("logical_order_assessment")
-    if not isinstance(assessment, dict):
-        raise ValueError("logical_order_assessment must be an object")
-    criteria_raw = assessment.get("criteria")
-    rationales_raw = assessment.get("criteria_rationales")
-    if not isinstance(criteria_raw, dict) or not isinstance(rationales_raw, dict):
-        raise ValueError("criteria and criteria_rationales must be objects")
-    criteria = {name: _normalize_score(criteria_raw.get(name)) for name in _CRITERIA}
-    rationales = {name: str(rationales_raw.get(name, "")).strip() for name in _CRITERIA}
-    missing = [name for name, value in rationales.items() if not value]
-    if missing:
-        raise ValueError(f"Missing criterion rationales: {', '.join(missing)}")
-    score = _normalize_score(assessment.get("score"))
-    minimum, maximum, _ = _band_for_scope(repair_scope)
-    if not minimum <= score <= maximum:
-        raise ValueError(
-            f"Score {score} contradicts repair scope {repair_scope}; "
-            f"expected {minimum}-{maximum}"
-        )
-    reason = str(assessment.get("reason", "")).strip()
-    if not reason:
-        raise ValueError("Logical Order assessment requires a reason")
-    recommendations_raw = assessment.get("recommendations", [])
-    if not isinstance(recommendations_raw, list):
-        raise ValueError("recommendations must be a list")
-    return {
-        "logical_order_assessment": {
-            "criteria": criteria,
-            "criteria_rationales": rationales,
-            "score": score,
-            "reason": reason,
-            "recommendations": [
-                str(item).strip()
-                for item in recommendations_raw
-                if str(item).strip()
-            ],
-        }
-    }
-
-
-def _fallback_result(
-    error: Exception,
-    *,
-    step_ids: list[str] | None = None,
-    analysis: dict[str, Any] | None = None,
-    dependency_graph: list[dict[str, str]] | None = None,
-    judge_execution: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    reason = f"Logical Order evaluation requires manual review: {type(error).__name__}."
-    evidence = analysis or {
-        "suggested_order": list(step_ids or []),
-        "dependency_violations": [],
-        "dependency_violation_count": 0,
-        "movement_count": 0,
-        "repair_scope": "unknown",
-    }
+def _fallback_result(error: Exception | None = None) -> dict[str, Any]:
+    reason = "Logical order judge failed; manual review is required."
+    if error:
+        reason = f"{reason} Error: {type(error).__name__}"
     return {
         "logical_order": {
             "score": 5.0,
@@ -733,253 +351,262 @@ def _fallback_result(
             "criteria": {name: 5.0 for name in _CRITERIA},
             "criteria_rationales": {name: reason for name in _CRITERIA},
             "has_valid_sequence": False,
-            "dependency_graph": dependency_graph or [],
-            "dependency_violations": evidence["dependency_violations"],
-            "dependency_violation_count": evidence["dependency_violation_count"],
-            "suggested_order": evidence["suggested_order"],
-            "movement_count": evidence["movement_count"],
-            "repair_scope": evidence["repair_scope"],
-            "issues": [
-                {
-                    "type": item["dependency_type"],
-                    "severity": item["severity"],
-                    "explanation": item["explanation"],
-                }
-                for item in evidence["dependency_violations"]
-            ],
+            "dependency_violations": [],
+            "dependency_violation_count": 0,
+            "suggested_order": [],
+            "issues": [],
             "recommendations": ["Review logical order manually."],
-            "normalization_notes": [str(error)],
+            "normalization_notes": [],
             "manual_review_required": True,
-            "judge_execution": judge_execution or {},
+        }
+    }
+
+
+def _normalize_result(
+    result: dict[str, Any],
+    roadmap: dict[str, Any],
+) -> dict[str, Any]:
+    raw = result.get("logical_order") if isinstance(result.get("logical_order"), dict) else {}
+    raw_criteria = raw.get("criteria") if isinstance(raw.get("criteria"), dict) else {}
+    raw_rationales = (
+        raw.get("criteria_rationales")
+        if isinstance(raw.get("criteria_rationales"), dict)
+        else {}
+    )
+    criteria = {name: _normalize_score(raw_criteria.get(name, 0)) for name in _CRITERIA}
+    criteria_rationales = {
+        name: str(raw_rationales.get(name, "")) for name in _CRITERIA
+    }
+
+    step_ids = _roadmap_step_ids(roadmap)
+    known_ids = set(step_ids)
+    positions = {step_id: idx for idx, step_id in enumerate(step_ids)}
+    notes: list[str] = []
+    manual_review_required = False
+    raw_suggested_order = raw.get("suggested_order")
+    suggested_order = (
+        [str(value).strip() for value in raw_suggested_order]
+        if isinstance(raw_suggested_order, list)
+        else []
+    )
+    if len(suggested_order) != len(step_ids) or set(suggested_order) != known_ids:
+        suggested_order = list(step_ids)
+        manual_review_required = True
+        notes.append(
+            "Replaced an incomplete or invalid suggested order with the current step order."
+        )
+
+    suggested_positions = {
+        step_id: idx for idx, step_id in enumerate(suggested_order)
+    }
+    violations: list[dict[str, Any]] = []
+    raw_violations = (
+        raw.get("dependency_violations")
+        if isinstance(raw.get("dependency_violations"), list)
+        else []
+    )
+    for item in raw_violations:
+        if not isinstance(item, dict):
+            notes.append("Ignored a non-object dependency violation.")
+            manual_review_required = True
+            continue
+        dependent_id = str(item.get("dependent_step_id", "")).strip()
+        predecessor_id = str(item.get("required_predecessor_step_id", "")).strip()
+        dependency_type = str(item.get("dependency_type", "prerequisite")).lower().strip()
+        dependency_type = _DEPENDENCY_TYPE_ALIASES.get(dependency_type, dependency_type)
+        severity = str(item.get("severity", "medium")).lower().strip()
+        if dependency_type not in _DEPENDENCY_TYPES:
+            notes.append("Discarded a dependency violation with an unknown dependency type.")
+            manual_review_required = True
+            continue
+        if severity not in _SEVERITIES:
+            notes.append("Discarded a dependency violation with an unknown severity.")
+            manual_review_required = True
+            continue
+        if dependent_id not in known_ids or predecessor_id not in known_ids:
+            notes.append(
+                "Discarded a dependency violation with an unknown step ID."
+            )
+            manual_review_required = True
+            continue
+        if positions[predecessor_id] <= positions[dependent_id]:
+            notes.append(
+                "Discarded a dependency violation whose predecessor is not after the dependent step."
+            )
+            manual_review_required = True
+            continue
+        if suggested_positions[predecessor_id] >= suggested_positions[dependent_id]:
+            notes.append(
+                "The suggested order does not correct a reported dependency violation."
+            )
+            manual_review_required = True
+        explanation = str(item.get("explanation", "")).strip()
+        suggested_fix = str(item.get("suggested_fix", "")).strip()
+        if not explanation or not suggested_fix:
+            notes.append("A dependency violation is missing its explanation or suggested fix.")
+            manual_review_required = True
+        violations.append({
+            "dependent_step_id": dependent_id,
+            "required_predecessor_step_id": predecessor_id,
+            "dependency_type": dependency_type,
+            "severity": severity,
+            "explanation": explanation,
+            "suggested_fix": suggested_fix,
+        })
+
+    if suggested_order != step_ids and not violations:
+        notes.append(
+            "The judge changed the suggested order without reporting a valid dependency violation."
+        )
+        manual_review_required = True
+    if suggested_order == step_ids and violations:
+        notes.append("The judge reported violations but preserved the current order.")
+        manual_review_required = True
+
+    score = _normalize_score(raw.get("score", 0))
+    severe_or_multiple = (
+        any(item["severity"] == "high" for item in violations)
+        or len(violations) >= 2
+    )
+    if not violations and score < 8.0:
+        notes.append("The score is below 8.0 even though no valid dependency violations remain.")
+        manual_review_required = True
+    elif violations and score >= 8.0:
+        notes.append("The score is 8.0 or higher despite reported dependency violations.")
+        manual_review_required = True
+    elif severe_or_multiple and score >= 5.0:
+        notes.append("The score is 5.0 or higher despite high-severity or multiple violations.")
+        manual_review_required = True
+
+    missing_rationales = [
+        name for name, rationale in criteria_rationales.items() if not rationale.strip()
+    ]
+    if missing_rationales:
+        notes.append(f"Missing criterion rationales: {', '.join(missing_rationales)}.")
+        manual_review_required = True
+
+    issues = [
+        {
+            "type": violation["dependency_type"],
+            "severity": violation["severity"],
+            "explanation": violation["explanation"],
+        }
+        for violation in violations
+    ]
+    recommendations = (
+        [str(item) for item in raw.get("recommendations", [])]
+        if isinstance(raw.get("recommendations"), list)
+        else []
+    )
+    reason = str(raw.get("reason", "")).strip()
+    if not reason:
+        notes.append("The judge did not provide an overall reason.")
+        manual_review_required = True
+
+    return {
+        "logical_order": {
+            "score": score,
+            "verdict": _verdict(score),
+            "score_band": _score_band(score),
+            "reason": reason,
+            "criteria": criteria,
+            "criteria_rationales": criteria_rationales,
+            "has_valid_sequence": not violations,
+            "dependency_violations": violations,
+            "dependency_violation_count": len(violations),
+            "suggested_order": suggested_order,
+            "issues": issues,
+            "recommendations": recommendations,
+            "normalization_notes": notes,
+            "manual_review_required": manual_review_required,
         }
     }
 
 
 class LogicalOrderJudge:
-    """Evaluate dependency order through a provider-neutral hybrid pipeline."""
+    """Evaluate roadmap dependency order with a dedicated LLM judge."""
 
     def __init__(self, llm=None):
         self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=2048)
+
+    def _invoke(self, prompt: str, attempt: int = 1) -> str:
+        return invoke_llm_text(
+            self.llm,
+            prompt,
+            operation="Logical Order",
+            attempt=attempt,
+        )
 
     def evaluate(
         self,
         roadmap: dict[str, Any],
         question: str = "",
         category: str = "",
-        contexts: list[str] | None = None,
     ) -> dict[str, Any]:
-        traces: dict[str, Any] = {}
-        step_ids: list[str] = []
-        graph_edges: list[dict[str, str]] = []
-        analysis: dict[str, Any] | None = None
-        active_stage = "dependency_extraction"
+        steps = roadmap.get("steps", [])
+        current_order_lines = [
+            (
+                f"position={position} | id={str(step.get('id', '')).strip()} "
+                f"| label={str(step.get('label', '')).strip()}"
+            )
+            for position, step in enumerate(steps, 1)
+            if isinstance(step, dict)
+        ] if isinstance(steps, list) else []
+        prompt = _PROMPT_TEMPLATE.format(
+            question=question or "(not provided)",
+            category=category or "(not provided)",
+            roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2)[:6000],
+            current_order="\n".join(current_order_lines) or "(no steps)",
+        )
         try:
-            steps = _roadmap_steps(roadmap)
-            step_ids = [str(step["id"]).strip() for step in steps]
-            max_edges = max(1, len(step_ids) * 2)
-            ordered_steps = [
-                {
-                    "position": index,
-                    "id": str(step["id"]).strip(),
-                    "label": str(step.get("label", "")),
-                    "description": str(step.get("description", "")),
-                    "key_points": step.get("key_points", []),
-                }
-                for index, step in enumerate(steps, 1)
-            ]
-            dependency_prompt = _DEPENDENCY_PROMPT.format(
-                question=question or "(not provided)",
-                category=category or "(not provided)",
-                contexts=json.dumps(contexts or [], ensure_ascii=False, indent=2)[:5000],
-                ordered_steps=json.dumps(
-                    ordered_steps, ensure_ascii=False, indent=2
-                )[:7000],
-                max_edges=max_edges,
-            )
-            graph_result, graph_trace = invoke_json_with_retry(
-                self.llm,
-                dependency_prompt,
-                operation="Logical Order dependency extraction",
-                parser=lambda raw: _parse_dependency_graph(
-                    raw, step_ids, max_edges
-                ),
-                repair_instruction=(
-                    "Return inverted_dependency_audit with exactly one entry for every "
-                    "roadmap step, in current order. Each later dependency must use an "
-                    "exact ID positioned after the audited step, an allowed dependency "
-                    f"type, and a brief explanation. Use at most {max_edges} direct edges."
-                ),
-            )
-            traces["dependency_extraction"] = graph_trace
-            graph_edges = graph_result["dependency_graph"]["edges"]
-            missing_step_ids = graph_result["missing_step_ids"]
-            if missing_step_ids:
-                missing_prompt = _MISSING_DEPENDENCY_PROMPT.format(
-                    question=question or "(not provided)",
-                    contexts=json.dumps(
-                        contexts or [], ensure_ascii=False, indent=2
-                    )[:5000],
-                    ordered_steps=json.dumps(
-                        ordered_steps, ensure_ascii=False, indent=2
-                    )[:7000],
-                    missing_step_ids=json.dumps(missing_step_ids, indent=2),
+            raw = self._invoke(prompt, attempt=1)
+            retried = False
+            retry_reason = ""
+            try:
+                parsed = _parse_json_response(raw)
+            except (json.JSONDecodeError, ValueError):
+                retry_reason = "the previous response was not valid JSON"
+                print(
+                    "      [LLM] Logical Order returned invalid JSON; "
+                    "starting one corrective retry.",
+                    flush=True,
                 )
-
-                def parse_missing(raw: str) -> dict[str, Any]:
-                    recovered = _parse_dependency_graph(
-                        raw,
-                        step_ids,
-                        max_edges,
-                        required_step_ids=missing_step_ids,
-                    )
-                    if recovered["missing_step_ids"]:
-                        raise ValueError(
-                            "Missing-step recovery remains incomplete: "
-                            + ", ".join(recovered["missing_step_ids"])
-                        )
-                    return recovered
-
-                active_stage = "missing_step_recovery"
-                recovered_graph, recovery_trace = invoke_json_with_retry(
-                    self.llm,
-                    missing_prompt,
-                    operation="Logical Order missing-step recovery",
-                    parser=parse_missing,
-                    repair_instruction=(
-                        "Return exactly one dependency-audit entry for each requested "
-                        f"missing ID: {', '.join(missing_step_ids)}."
-                    ),
+                retry_prompt = (
+                    f"{prompt}\n\nRETRY REQUIREMENT\n"
+                    "The previous response was not valid JSON. Return the complete JSON object only."
                 )
-                traces["missing_step_recovery"] = recovery_trace
-                graph_edges = _merge_dependency_edges(
-                    graph_edges,
-                    recovered_graph["dependency_graph"]["edges"],
+                retry_raw = self._invoke(retry_prompt, attempt=2)
+                parsed = _parse_json_response(retry_raw)
+                retried = True
+            normalized = _normalize_result(parsed, roadmap)
+            if (
+                not retried
+                and normalized["logical_order"].get("manual_review_required")
+            ):
+                notes = normalized["logical_order"].get("normalization_notes", [])
+                retry_reason = "; ".join(str(note) for note in notes)
+                print(
+                    "      [LLM] Logical Order contract inconsistent; "
+                    "starting one corrective retry.",
+                    flush=True,
                 )
-            analysis = _analyze_order(step_ids, graph_edges)
-            indexed_candidates = [
-                {
-                    "edge_index": index,
-                    "premature_step_id": edge["after_step_id"],
-                    "required_later_step_id": edge["before_step_id"],
-                    "dependency_type": edge["dependency_type"],
-                    "explanation": edge["explanation"],
-                }
-                for index, edge in enumerate(graph_edges)
-            ]
-
-            if indexed_candidates:
-                audit_prompt = _EDGE_AUDIT_PROMPT.format(
-                    steps=json.dumps(steps, ensure_ascii=False, indent=2)[:6500],
-                    contexts=json.dumps(
-                        contexts or [], ensure_ascii=False, indent=2
-                    )[:5000],
-                    candidate_edges=json.dumps(
-                        indexed_candidates, ensure_ascii=False, indent=2
-                    ),
+                retry_prompt = (
+                    f"{prompt}\n\nRETRY REQUIREMENT\n"
+                    "The previous JSON violated the evaluation contract: "
+                    f"{retry_reason}. Re-evaluate the CURRENT STEP POSITIONS, "
+                    "ensure every predecessor is currently after its dependent "
+                    "step, and make score, violations, and suggested_order "
+                    "consistent. Return the complete JSON object only."
                 )
-                active_stage = "dependency_audit"
-                audit_result, audit_trace = invoke_json_with_retry(
-                    self.llm,
-                    audit_prompt,
-                    operation="Logical Order dependency audit",
-                    parser=lambda raw: _parse_edge_audit(
-                        raw,
-                        step_ids,
-                        graph_edges,
-                        roadmap,
-                        contexts or [],
-                    ),
-                    repair_instruction=(
-                        "Return exactly one edge_audit entry for every edge_index. "
-                        "For each entry, verdict must be CONFIRMED_STRICT_INVERSION or "
-                        "KEEP_CURRENT_ORDER. Confirming an inversion requires exact "
-                        "roadmap or context evidence quotes."
-                    ),
+                parsed = _parse_json_response(
+                    self._invoke(retry_prompt, attempt=2)
                 )
-                traces["dependency_audit"] = audit_trace
-                candidate_audit = audit_result["edge_audit"]
-                graph_edges = audit_result["accepted_dependency_graph"]
-                analysis = audit_result["deterministic_analysis"]
-            else:
-                candidate_audit = []
-                graph_edges = []
-                analysis = _analyze_order(step_ids, [])
-                traces["dependency_audit"] = {
-                    "attempt_count": 0,
-                    "recovered": False,
-                    "validation_errors": [],
-                    "skipped": "no candidate inversions",
-                }
-
-            _, _, mandatory_band = _band_for_scope(analysis["repair_scope"])
-            scoring_prompt = _FINAL_SCORING_PROMPT.format(
-                question=question or "(not provided)",
-                category=category or "(not provided)",
-                steps=json.dumps(steps, ensure_ascii=False, indent=2)[:6500],
-                analysis=json.dumps(analysis, ensure_ascii=False, indent=2),
-                score_band=mandatory_band,
-            )
-            active_stage = "scoring"
-            scoring_result, scoring_trace = invoke_json_with_retry(
-                self.llm,
-                scoring_prompt,
-                operation="Logical Order scoring",
-                parser=lambda raw: _parse_final_scoring(
-                    raw, analysis["repair_scope"]
-                ),
-                repair_instruction=(
-                    "Return the complete logical_order_assessment and keep "
-                    f"the final score inside the mandatory {mandatory_band} band."
-                ),
-            )
-            traces["scoring"] = scoring_trace
-            assessment = scoring_result["logical_order_assessment"]
-            score = assessment["score"]
-            violations = analysis["dependency_violations"]
-            return {
-                "logical_order": {
-                    "score": score,
-                    "verdict": _verdict(score),
-                    "score_band": _score_band(score),
-                    "reason": assessment["reason"],
-                    "criteria": assessment["criteria"],
-                    "criteria_rationales": assessment["criteria_rationales"],
-                    "has_valid_sequence": not violations,
-                    "dependency_graph": graph_edges,
-                    "dependency_candidate_audit": candidate_audit,
-                    "dependency_violations": violations,
-                    "dependency_violation_count": len(violations),
-                    "suggested_order": analysis["suggested_order"],
-                    "movement_count": analysis["movement_count"],
-                    "repair_scope": analysis["repair_scope"],
-                    "issues": [
-                        {
-                            "type": item["dependency_type"],
-                            "severity": item["severity"],
-                            "explanation": item["explanation"],
-                        }
-                        for item in violations
-                    ],
-                    "recommendations": assessment["recommendations"],
-                    "normalization_notes": [],
-                    "manual_review_required": False,
-                    "judge_execution": traces,
-                }
-            }
-        except StructuredOutputError as exc:
-            traces[active_stage] = exc.trace
-            return _fallback_result(
-                exc,
-                step_ids=step_ids,
-                analysis=analysis,
-                dependency_graph=graph_edges,
-                judge_execution=traces,
-            )
+                normalized = _normalize_result(parsed, roadmap)
+                retried = True
+            if retried:
+                normalized["logical_order"]["normalization_notes"].append(
+                    f"Retried once after an incomplete response: {retry_reason}."
+                )
+            return normalized
         except Exception as exc:
-            return _fallback_result(
-                exc,
-                step_ids=step_ids,
-                analysis=analysis,
-                dependency_graph=graph_edges,
-                judge_execution=traces,
-            )
+            return _fallback_result(exc)
