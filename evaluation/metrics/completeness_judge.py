@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from evaluation.structured_output import StructuredOutputError, invoke_json_with_retry
 from src.llm_provider import get_judge_llm
 
 
@@ -67,6 +68,10 @@ When EXPECTED ELEMENTS are provided:
 When EXPECTED ELEMENTS are empty:
 - infer the smallest sufficient set of expected elements from the questions,
   explicit scope, and ground truth;
+- define that expected universe before assessing the roadmap itself;
+- never add an expected element merely because the evaluated roadmap contains
+  it; erroneous, premature, duplicated, or unsupported roadmap actions are not
+  requirements unless the question, scope, or ground truth asks for them;
 - assign stable IDs such as expected_1, expected_2, and so on;
 - avoid inflating the universe with merely optional enhancements.
 
@@ -257,10 +262,12 @@ def _gap_severity(importance: str, status: str) -> str:
 def _fallback_result(
     expected_elements: list[dict[str, str]],
     error: Exception | None = None,
+    execution_trace: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     reason = "Completeness judge failed; manual review is required."
     if error:
-        reason = f"{reason} Error: {type(error).__name__}"
+        error_type = getattr(error, "last_error_type", type(error).__name__)
+        reason = f"{reason} Error: {error_type}"
     elements = [
         {
             **element,
@@ -303,6 +310,11 @@ def _fallback_result(
             "recommendations": ["Review Completeness manually."],
             "normalization_notes": [],
             "manual_review_required": True,
+            "judge_execution": execution_trace or {
+                "attempt_count": 0,
+                "recovered": False,
+                "validation_errors": [],
+            },
         }
     }
 
@@ -504,14 +516,50 @@ def _normalize_result(
     }
 
 
+class CompletenessContractError(ValueError):
+    """The parsed assessment contradicts its own coverage diagnostics."""
+
+
+def _validate_semantic_contract(normalized: dict[str, Any]) -> dict[str, Any]:
+    """Reject score/coverage contradictions without rewriting the score."""
+    value = normalized["completeness"]
+    elements = value.get("expected_elements", [])
+    score = float(value.get("score", 0))
+    gaps = [item for item in elements if item.get("coverage_status") != "covered"]
+    critical_missing = any(
+        item.get("importance") == "critical"
+        and item.get("coverage_status") == "missing"
+        for item in elements
+    )
+    critical_partial = any(
+        item.get("importance") == "critical"
+        and item.get("coverage_status") == "partial"
+        for item in elements
+    )
+    important_missing = any(
+        item.get("importance") == "important"
+        and item.get("coverage_status") == "missing"
+        for item in elements
+    )
+    errors = []
+    if critical_missing and score >= 5.0:
+        errors.append("missing critical coverage requires a score below 5.0")
+    if critical_partial and score >= 8.0:
+        errors.append("partial critical coverage requires a score below 8.0")
+    if important_missing and score >= 8.0:
+        errors.append("missing important coverage requires a score below 8.0")
+    if elements and not gaps and score < 8.0:
+        errors.append("complete expected coverage requires a score of at least 8.0")
+    if errors:
+        raise CompletenessContractError("; ".join(errors))
+    return normalized
+
+
 class CompletenessJudge:
     """Evaluate roadmap Completeness against an explicit or inferred universe."""
 
     def __init__(self, llm=None):
         self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=4096)
-
-    def _invoke(self, prompt: str) -> str:
-        return self.llm.invoke(prompt).content
 
     def evaluate(
         self,
@@ -532,22 +580,30 @@ class CompletenessJudge:
             roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2),
         )
         try:
-            raw = self._invoke(prompt)
-            retried = False
-            try:
-                parsed = _parse_json_response(raw)
-            except (json.JSONDecodeError, ValueError):
-                retry_prompt = (
-                    f"{prompt}\n\nRETRY REQUIREMENT\n"
-                    "The previous response was not valid JSON. Return the complete JSON object only."
-                )
-                parsed = _parse_json_response(self._invoke(retry_prompt))
-                retried = True
-            normalized = _normalize_result(parsed, roadmap, provided)
-            if retried:
+            normalized, execution_trace = invoke_json_with_retry(
+                self.llm,
+                prompt,
+                operation="Completeness",
+                parser=lambda raw: _validate_semantic_contract(
+                    _normalize_result(_parse_json_response(raw), roadmap, provided)
+                ),
+                repair_instruction=(
+                    "Return exactly one complete JSON object matching the requested "
+                    "Completeness schema. Close every array, object, and string. "
+                    "Reconcile the score with coverage: any missing critical element "
+                    "requires 0.0-4.9, partial critical coverage requires below 8.0, "
+                    "and complete critical coverage with no meaningful gaps belongs "
+                    "in 8.0-10.0."
+                ),
+                max_attempts=2,
+            )
+            normalized["completeness"]["judge_execution"] = execution_trace
+            if execution_trace["recovered"]:
                 normalized["completeness"]["normalization_notes"].append(
                     "Retried once after an invalid JSON response."
                 )
             return normalized
+        except StructuredOutputError as exc:
+            return _fallback_result(provided, exc, exc.trace)
         except Exception as exc:
             return _fallback_result(provided, exc)

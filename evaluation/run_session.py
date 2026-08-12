@@ -151,6 +151,7 @@ class RunCheckpoint:
                     "expected_keywords": list(getattr(sample, "expected_keywords", [])),
                     "category": str(getattr(sample, "category", "")),
                     "expected_step_order": list(getattr(sample, "expected_step_order", [])),
+                    "expected_elements": list(getattr(sample, "expected_elements", [])),
                 }
             entries.append({
                 "sample": sample_data,

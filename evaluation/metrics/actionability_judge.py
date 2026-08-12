@@ -11,6 +11,7 @@ import json
 import re
 from typing import Any
 
+from evaluation.structured_output import invoke_json_with_retry
 from src.llm_provider import get_judge_llm, invoke_llm_text
 
 
@@ -89,6 +90,21 @@ ACTIONABILITY CRITERIA
 5. Execution specificity
    - The combined label and description remove enough ambiguity to act without
      inventing the main procedure.
+
+NON-NEGOTIABLE INTERPRETATION
+- Naming an intention, topic, phase, or desired improvement is not the same as
+  providing an executable action. Do not infer an omitted method, input, or
+  result from professional experience.
+- A step that says to understand, consider, improve, handle, review, or finish
+  something must still identify what the user produces or changes and how the
+  user can do or verify it. Otherwise its method, result, or specificity is
+  partial or missing.
+- High-level scope is not a reason to mark execution criteria as
+  "not_applicable". Use "not_applicable" only when the criterion is genuinely
+  irrelevant to the step's responsibility, not when the roadmap omitted it.
+- In every per-step reason, point to the concrete method and expected result
+  present in the step. If neither can be identified from the text or from one
+  standard unambiguous operation it names, the step cannot be ACTIONABLE.
 
 ROLE-AWARE EVALUATION
 - A framing step may produce a scope, decision, requirement, or success target.
@@ -255,15 +271,14 @@ MATERIAL BLOCKERS VS OPTIONAL IMPROVEMENTS
 For every step, separate:
 - material_missing_elements: absent information that prevents or substantially
   changes execution of the step's main responsibility;
-- optional_improvements: useful tutorials, examples, edge cases, safeguards,
-  richer checks, or UI detail that would improve the instruction but is not
-  needed to execute its main responsibility.
+- optional improvements: useful tutorials, examples, edge cases, safeguards,
+  richer checks, or UI detail that is not needed to execute the main
+  responsibility. Do not include optional improvements in the JSON output.
 
 Only material_missing_elements may lower the per-step score below 8.0.
 Optional improvements must not lower the score or create a weak step.
 Do not describe the same absent detail as both a material blocker and an
-optional improvement. If execution can proceed without it, it is optional and
-must not appear in material_missing_elements.
+optional improvement. If execution can proceed without it, omit it entirely.
 
 CONSISTENCY REQUIREMENTS
 - Return exactly one step_actionability entry for every roadmap step.
@@ -290,6 +305,13 @@ CONSISTENCY REQUIREMENTS
 - The overall score, overall reason, per-step diagnostics, criterion scores,
   strengths, and recommendations must describe the same evaluation.
 
+OUTPUT BUDGET
+- Return compact JSON and include every roadmap step before adding narrative.
+- Keep each per-step reason and recommendation under 18 words.
+- Keep each roadmap-level criterion rationale under 20 words.
+- Return at most two strengths and two overall recommendations.
+- Do not return optional_improvements; the application supplies an empty list.
+
 Expected JSON schema:
 {{
   "actionability": {{
@@ -306,7 +328,6 @@ Expected JSON schema:
         }},
         "reason": "<case-specific explanation>",
         "material_missing_elements": ["action|method|input|output|specificity", "..."],
-        "optional_improvements": ["<non-blocking improvement>", "..."],
         "recommendation": "<local clarification or empty string>"
       }}
     ],
@@ -328,6 +349,86 @@ Expected JSON schema:
     "reason": "<short explanation supporting the score band>",
     "strengths": ["<strength>", "..."],
     "recommendations": ["<recommendation>", "..."]
+  }}
+}}
+"""
+
+
+_PER_STEP_STAGE_OVERRIDE = """\
+
+PER-STEP STAGE OVERRIDE
+For this first stage, return per-step evidence only. Do not return roadmap-level
+criteria, rationales, score, reason, strengths, or recommendations. Include
+every roadmap step exactly once and keep the response compact.
+
+Return exactly:
+{{
+  "actionability": {{
+    "step_actionability": [
+      {{
+        "step_id": "<exact step ID>",
+        "score": <0-10>,
+        "criteria": {{
+          "identifiable_action": "met|partial|missing|not_applicable",
+          "execution_method": "met|partial|missing|not_applicable",
+          "starting_point": "met|partial|missing|not_applicable",
+          "expected_result": "met|partial|missing|not_applicable",
+          "execution_specificity": "met|partial|missing|not_applicable"
+        }},
+        "reason": "<18 words maximum>",
+        "material_missing_elements": ["action|method|input|output|specificity"],
+        "recommendation": "<18 words maximum or empty>"
+      }}
+    ]
+  }}
+}}
+"""
+
+
+_SUMMARY_PROMPT = """\
+You are producing the roadmap-level Actionability assessment from completed
+per-step evidence. Return ONLY valid JSON with no markdown or extra text.
+
+USER QUESTION
+{question}
+
+CATEGORY
+{category}
+
+PER-STEP ACTIONABILITY EVIDENCE
+{step_evidence}
+
+Select the overall band from practical clarification burden, not an arithmetic
+average:
+- 8.0-10.0: executable with little interpretation;
+- 5.0-7.9: usable but requires bounded material clarification;
+- 0.0-4.9: many or core steps require inventing the main procedure.
+
+Do not evaluate factual correctness, support, missing roadmap content, order,
+overlap, or global structure. Keep every rationale under 20 words and return at
+most two strengths and two recommendations.
+
+Return exactly:
+{{
+  "actionability": {{
+    "criteria": {{
+      "identifiable_action": <0-10>,
+      "execution_method": <0-10>,
+      "starting_point": <0-10>,
+      "expected_result": <0-10>,
+      "execution_specificity": <0-10>
+    }},
+    "criteria_rationales": {{
+      "identifiable_action": "<rationale>",
+      "execution_method": "<rationale>",
+      "starting_point": "<rationale>",
+      "expected_result": "<rationale>",
+      "execution_specificity": "<rationale>"
+    }},
+    "score": <0-10>,
+    "reason": "<short explanation>",
+    "strengths": ["<strength>"],
+    "recommendations": ["<recommendation>"]
   }}
 }}
 """
@@ -355,6 +456,34 @@ def _parse_json_response(raw: str) -> dict[str, Any]:
         parsed = json.loads(text[start:end + 1])
     if not isinstance(parsed, dict):
         raise ValueError("Actionability response must be a JSON object")
+    return parsed
+
+
+def _parse_summary_response(raw: str) -> dict[str, Any]:
+    parsed = _parse_json_response(raw)
+    summary = parsed.get("actionability")
+    if not isinstance(summary, dict):
+        raise ValueError("Actionability summary must contain an actionability object")
+    criteria = summary.get("criteria")
+    rationales = summary.get("criteria_rationales")
+    if not isinstance(criteria, dict) or not isinstance(rationales, dict):
+        raise ValueError("Actionability summary requires criteria and rationales")
+    missing_criteria = [name for name in _CRITERIA if name not in criteria]
+    missing_rationales = [
+        name for name in _CRITERIA if not str(rationales.get(name, "")).strip()
+    ]
+    if missing_criteria or missing_rationales:
+        raise ValueError(
+            "Incomplete Actionability summary fields: "
+            f"criteria={missing_criteria}, rationales={missing_rationales}"
+        )
+    _normalize_score(summary.get("score"))
+    if not str(summary.get("reason", "")).strip():
+        raise ValueError("Actionability summary requires an overall reason")
+    if not isinstance(summary.get("strengths", []), list):
+        raise ValueError("Actionability strengths must be a list")
+    if not isinstance(summary.get("recommendations", []), list):
+        raise ValueError("Actionability recommendations must be a list")
     return parsed
 
 
@@ -406,7 +535,6 @@ def _fallback_step(step: dict[str, Any], reason: str) -> dict[str, Any]:
         "criteria": {name: "partial" for name in _CRITERIA},
         "reason": reason,
         "missing_elements": ["specificity"],
-        "optional_improvements": [],
         "recommendation": "Review this step manually.",
     }
 
@@ -818,11 +946,16 @@ class ActionabilityJudge:
     def __init__(self, llm=None):
         self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=4096)
 
-    def _invoke(self, prompt: str, attempt: int = 1) -> str:
+    def _invoke(
+        self,
+        prompt: str,
+        attempt: int = 1,
+        operation: str = "Actionability step audit",
+    ) -> str:
         return invoke_llm_text(
             self.llm,
             prompt,
-            operation="Actionability",
+            operation=operation,
             attempt=attempt,
         )
 
@@ -832,62 +965,149 @@ class ActionabilityJudge:
         question: str = "",
         category: str = "",
     ) -> dict[str, Any]:
-        prompt = _PROMPT_TEMPLATE.format(
-            question=question or "(not provided)",
-            category=category or "(not provided)",
-            roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2)[:7000],
-        )
         try:
-            raw = self._invoke(prompt, attempt=1)
-            retried = False
-            retry_reason = ""
-            try:
-                parsed = _parse_json_response(raw)
-            except (json.JSONDecodeError, ValueError):
-                retry_reason = "the previous response was not valid JSON"
-                parsed = None
-            if parsed is not None:
-                contract_issues = _step_contract_issues(parsed, roadmap)
-                if contract_issues:
-                    retry_reason = "; ".join(contract_issues)
-            if retry_reason:
-                expected_ids = [
-                    str(step.get("id", "")).strip()
-                    for step in _roadmap_steps(roadmap)
-                    if str(step.get("id", "")).strip()
-                ]
-                print(
-                    f"      [LLM] Actionability contract incomplete ({retry_reason}); "
-                    "starting one corrective retry.",
-                    flush=True,
+            steps = _roadmap_steps(roadmap)
+            batches = [steps[index:index + 4] for index in range(0, len(steps), 4)]
+            step_evidence: list[dict[str, Any]] = []
+            batch_traces: list[dict[str, Any]] = []
+            retry_notes: list[str] = []
+            for batch_index, batch_steps in enumerate(batches, 1):
+                batch_roadmap = {
+                    "title": roadmap.get("title", ""),
+                    "steps": batch_steps,
+                }
+                prompt = _PROMPT_TEMPLATE.format(
+                    question=question or "(not provided)",
+                    category=category or "(not provided)",
+                    roadmap=json.dumps(
+                        batch_roadmap, ensure_ascii=False, indent=2
+                    )[:7000],
+                ) + _PER_STEP_STAGE_OVERRIDE
+                operation = (
+                    f"Actionability step batch {batch_index}/{len(batches)}"
                 )
-                missing_ids = _missing_step_ids(parsed, roadmap) if parsed else []
-                targeted_retry = bool(parsed and missing_ids and all(
-                    issue.startswith("missing step IDs:") for issue in contract_issues
-                ))
-                if targeted_retry:
-                    retry_prompt = _missing_steps_retry_prompt(roadmap, missing_ids)
-                    patch = _parse_json_response(self._invoke(retry_prompt, attempt=2))
-                    patch_root = patch.get("actionability", {})
-                    patch_entries = patch_root.get("step_actionability", [])
-                    if not isinstance(patch_entries, list):
-                        raise ValueError("Actionability retry did not return step entries")
-                    parsed["actionability"]["step_actionability"].extend(patch_entries)
-                else:
-                    retry_prompt = (
-                        f"{prompt}\n\nRETRY REQUIREMENT\n"
-                        f"The previous response was incomplete because {retry_reason}. "
-                        "Return valid JSON with exactly one step_actionability entry "
-                        f"for each of these IDs, in this order: {expected_ids}. "
-                        "Return the complete JSON object only."
+                raw = self._invoke(prompt, attempt=1, operation=operation)
+                batch_retried = False
+                retry_reason = ""
+                contract_issues: list[str] = []
+                try:
+                    batch_result = _parse_json_response(raw)
+                except (json.JSONDecodeError, ValueError):
+                    retry_reason = "the previous response was not valid JSON"
+                    batch_result = None
+                if batch_result is not None:
+                    contract_issues = _step_contract_issues(
+                        batch_result, batch_roadmap
                     )
-                    parsed = _parse_json_response(self._invoke(retry_prompt, attempt=2))
-                retried = True
-            normalized = _normalize_result(parsed, roadmap)
-            if retried:
-                normalized["actionability"]["normalization_notes"].append(
-                    f"Retried once after an incomplete response: {retry_reason}."
+                    if contract_issues:
+                        retry_reason = "; ".join(contract_issues)
+                if retry_reason:
+                    expected_ids = [
+                        str(step.get("id", "")).strip()
+                        for step in batch_steps
+                    ]
+                    print(
+                        f"      [LLM] {operation} contract incomplete "
+                        f"({retry_reason}); starting one corrective retry.",
+                        flush=True,
+                    )
+                    missing_ids = (
+                        _missing_step_ids(batch_result, batch_roadmap)
+                        if batch_result
+                        else []
+                    )
+                    targeted_retry = bool(
+                        batch_result
+                        and missing_ids
+                        and all(
+                            issue.startswith("missing step IDs:")
+                            for issue in contract_issues
+                        )
+                    )
+                    if targeted_retry:
+                        retry_prompt = _missing_steps_retry_prompt(
+                            batch_roadmap, missing_ids
+                        )
+                        patch_result = _parse_json_response(
+                            self._invoke(
+                                retry_prompt,
+                                attempt=2,
+                                operation=operation,
+                            )
+                        )
+                        patch_entries = patch_result.get(
+                            "actionability", {}
+                        ).get("step_actionability", [])
+                        if not isinstance(patch_entries, list):
+                            raise ValueError(
+                                "Actionability retry did not return step entries"
+                            )
+                        batch_result["actionability"][
+                            "step_actionability"
+                        ].extend(patch_entries)
+                    else:
+                        retry_prompt = (
+                            f"{prompt}\n\nRETRY REQUIREMENT\n"
+                            f"The previous response was incomplete because {retry_reason}. "
+                            "Return exactly one step_actionability entry for each of "
+                            f"these IDs, in order: {expected_ids}."
+                        )
+                        batch_result = _parse_json_response(
+                            self._invoke(
+                                retry_prompt,
+                                attempt=2,
+                                operation=operation,
+                            )
+                        )
+                    batch_retried = True
+                    retry_notes.append(
+                        f"Batch {batch_index} retried: {retry_reason}."
+                    )
+                final_issues = _step_contract_issues(
+                    batch_result, batch_roadmap
                 )
+                if final_issues:
+                    raise ValueError(
+                        "Actionability batch remained incomplete: "
+                        + "; ".join(final_issues)
+                    )
+                step_evidence.extend(
+                    batch_result["actionability"]["step_actionability"]
+                )
+                batch_traces.append({
+                    "batch": batch_index,
+                    "step_ids": [str(step.get("id", "")) for step in batch_steps],
+                    "attempt_count": 2 if batch_retried else 1,
+                    "recovered": batch_retried,
+                    "retry_reason": retry_reason or None,
+                })
+
+            summary_prompt = _SUMMARY_PROMPT.format(
+                question=question or "(not provided)",
+                category=category or "(not provided)",
+                step_evidence=json.dumps(
+                    step_evidence, ensure_ascii=False, indent=2
+                )[:7000],
+            )
+            summary_result, summary_trace = invoke_json_with_retry(
+                self.llm,
+                summary_prompt,
+                operation="Actionability summary",
+                parser=_parse_summary_response,
+                repair_instruction=(
+                    "Return the complete roadmap-level actionability contract with all "
+                    "five criteria, rationales, score, reason, strengths, and recommendations."
+                ),
+            )
+            summary = summary_result["actionability"]
+            parsed = {"actionability": {"step_actionability": step_evidence}}
+            parsed["actionability"].update(summary)
+            normalized = _normalize_result(parsed, roadmap)
+            normalized["actionability"]["normalization_notes"].extend(retry_notes)
+            normalized["actionability"]["judge_execution"] = {
+                "step_batches": batch_traces,
+                "summary": summary_trace,
+            }
             return normalized
         except Exception as exc:
             return _fallback_result(roadmap, exc)

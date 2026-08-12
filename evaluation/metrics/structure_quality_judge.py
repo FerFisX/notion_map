@@ -8,8 +8,10 @@ StructureValidator, which checks schema validity.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
+from evaluation.structured_output import invoke_json_with_retry
 from src.llm_provider import get_judge_llm
 
 
@@ -117,6 +119,19 @@ Do NOT evaluate:
 You may mention these issues only when they affect the roadmap's overall shape
 as a navigable artifact, but do not rescore those dimensions directly.
 
+LANGUAGE OWNERSHIP
+- Never describe a roadmap as "logically ordered", "correctly ordered", or as
+  having ordered steps, valid prerequisites, or valid dependencies. Do not
+  discuss step order. Those conclusions belong only to Logical Order.
+- The words "logical" and "logically" are forbidden anywhere in the Structure
+  Quality output. Use "cohesive", "navigable", or "clear structural arc" when
+  describing shape and transitions.
+- Describe positive flow only with structural language such as "clear arc",
+  "cohesive phases", "stable perspective", or "understandable transitions".
+- Strengths, reasons, rationales, issues, and recommendations must follow this
+  vocabulary boundary. A cohesive-looking roadmap may still contain invalid
+  causal dependencies that Structure Quality must not judge.
+
 Use this scoring scale explicitly:
 - 8.0-10.0: strong structure; the roadmap has clear framing, useful granularity,
   coherent shape, meaningful closure, and length that fits the question.
@@ -204,6 +219,21 @@ Expected JSON schema:
 """
 
 
+_LANGUAGE_CORRECTION_PROMPT = """\
+Rewrite only the textual fields in this Structure Quality JSON so they use
+structural vocabulary. Preserve every number, enum, list item meaning, issue,
+and recommendation. Do not reassess the roadmap or change any score.
+
+Describe flow as a clear arc, cohesive phases, stable perspective, navigable
+transitions, or fragmented progression. Do not discuss prerequisites, causal
+dependencies, correct ordering, describe steps as ordered, discuss step order,
+or use the words logical or logically.
+
+Return ONLY the complete corrected JSON object:
+{assessment}
+"""
+
+
 def _strip_markdown_json(raw: str) -> str:
     text = raw.strip()
     if text.startswith("```"):
@@ -212,6 +242,44 @@ def _strip_markdown_json(raw: str) -> str:
         if text.startswith("json"):
             text = text[4:]
     return text.strip()
+
+
+def _parse_structure_response(raw: str) -> dict[str, Any]:
+    parsed = json.loads(_strip_markdown_json(raw))
+    if not isinstance(parsed, dict):
+        raise ValueError("Structure Quality response must be a JSON object")
+    quality = parsed.get("structure_quality")
+    if not isinstance(quality, dict):
+        raise ValueError("structure_quality must be an object")
+    return parsed
+
+
+def _structure_boundary_terms(parsed: dict[str, Any]) -> list[str]:
+    quality = parsed.get("structure_quality") or {}
+    serialized = json.dumps(quality, ensure_ascii=False).lower()
+    forbidden_phrases = (
+        "logically ordered",
+        "correctly ordered",
+        "prerequisite order",
+        "dependency order",
+        "causal dependency",
+        "steps are ordered",
+        "step order",
+    )
+    used = [phrase for phrase in forbidden_phrases if phrase in serialized]
+    if re.search(r"\blogic(?:al|ally)\b", serialized):
+        used.append("logical/logically")
+    return sorted(set(used))
+
+
+def _parse_structure_boundary_response(raw: str) -> dict[str, Any]:
+    parsed = _parse_structure_response(raw)
+    used = _structure_boundary_terms(parsed)
+    if used:
+        raise ValueError(
+            "Structure Quality used Logical Order vocabulary: " + ", ".join(used)
+        )
+    return parsed
 
 
 def _verdict(score: float) -> str:
@@ -392,8 +460,45 @@ class StructureQualityJudge:
             roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2)[:6000],
         )
         try:
-            raw = self.llm.invoke(prompt).content
-            parsed = json.loads(_strip_markdown_json(raw))
-            return _normalize_result(parsed)
+            parsed, trace = invoke_json_with_retry(
+                self.llm,
+                prompt,
+                operation="Structure Quality",
+                parser=_parse_structure_response,
+                repair_instruction=(
+                    "Return the complete structure_quality JSON contract using only "
+                    "structural vocabulary. Do not assess logical order, prerequisites, "
+                    "or causal dependencies. Do not use the words logical or logically "
+                    "anywhere in the output."
+                ),
+            )
+            boundary_terms = _structure_boundary_terms(parsed)
+            if boundary_terms:
+                corrected, correction_trace = invoke_json_with_retry(
+                    self.llm,
+                    _LANGUAGE_CORRECTION_PROMPT.format(
+                        assessment=json.dumps(parsed, ensure_ascii=False, indent=2)
+                    ),
+                    operation="Structure Quality language correction",
+                    parser=_parse_structure_boundary_response,
+                    repair_instruction=(
+                        "Return the complete JSON with identical scores and findings, "
+                        "but remove Logical Order terminology from every textual field."
+                    ),
+                )
+                original_quality = parsed["structure_quality"]
+                corrected_quality = corrected["structure_quality"]
+                corrected_quality["score"] = original_quality.get("score")
+                corrected_quality["criteria"] = original_quality.get("criteria")
+                original_scope = original_quality.get("scope_fit") or {}
+                corrected_scope = corrected_quality.get("scope_fit") or {}
+                for field in ("ideal_step_count", "actual_step_count", "difference"):
+                    corrected_scope[field] = original_scope.get(field)
+                corrected_quality["scope_fit"] = corrected_scope
+                parsed = corrected
+                trace["language_correction"] = correction_trace
+            normalized = _normalize_result(parsed)
+            normalized["structure_quality"]["judge_execution"] = trace
+            return normalized
         except Exception as exc:
             return _fallback_result(exc)

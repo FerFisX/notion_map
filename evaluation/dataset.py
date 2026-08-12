@@ -4,7 +4,7 @@ Basado en los 3 PDFs cargados: llaves candidatas, Power Query, N8N con IA.
 """
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, List
 
 
 @dataclass
@@ -15,6 +15,8 @@ class EvalSample:
     category:            str
     expected_step_order: List[str] = field(default_factory=list)
     # ^ pasos esperados en orden lógico (para validar secuencia)
+    expected_elements: List[dict[str, Any]] = field(default_factory=list)
+    # ^ universo opcional y estable para evaluar cobertura con Completeness
 
 
 EVAL_SAMPLES: List[EvalSample] = [
@@ -265,6 +267,98 @@ EVAL_SAMPLES: List[EvalSample] = [
             "Configurar el tamaño de la ventana",
             "Conectar la memoria al nodo AI Agent",
             "Probar que el agente recuerda el contexto",
+        ],
+    ),
+
+    # Muestra representativa para generación real de roadmaps
+    EvalSample(
+        question=(
+            "¿Cómo puedo aprender e implementar Time Intelligence en DAX para "
+            "comparar ventas entre diferentes periodos?"
+        ),
+        ground_truth=(
+            "Definir el objetivo de comparación temporal, preparar una tabla calendario "
+            "continua y marcada, relacionarla con ventas, validar una medida base, crear "
+            "medidas para periodos comparables y comprobarlas con resultados conocidos."
+        ),
+        expected_keywords=[
+            "Time Intelligence", "DAX", "tabla calendario", "medida base",
+            "periodo anterior", "validación",
+        ],
+        category="dax_time_intelligence",
+        expected_step_order=[
+            "Definir el objetivo de comparación temporal",
+            "Preparar la tabla calendario y sus relaciones",
+            "Crear y validar la medida base",
+            "Crear las medidas de comparación temporal",
+            "Validar los resultados con periodos conocidos",
+        ],
+        expected_elements=[
+            {"name": "Objetivo de comparación temporal", "importance": "important"},
+            {"name": "Tabla calendario continua, marcada y relacionada", "importance": "critical"},
+            {"name": "Medida base validada", "importance": "critical"},
+            {"name": "Medidas para periodo anterior y variación", "importance": "critical"},
+            {"name": "Validación con periodos conocidos", "importance": "critical"},
+        ],
+    ),
+    EvalSample(
+        question=(
+            "¿Cómo puedo documentar un sistema utilizando niveles de abstracción "
+            "conceptual, lógico y de implementación?"
+        ),
+        ground_truth=(
+            "Definir el objetivo y la audiencia, describir capacidades y conceptos del "
+            "dominio, representar componentes y contratos lógicos, documentar tecnologías "
+            "y configuraciones de implementación, y validar la trazabilidad entre niveles."
+        ),
+        expected_keywords=[
+            "conceptual", "lógico", "implementación", "trazabilidad",
+            "audiencia", "contratos",
+        ],
+        category="niveles_abstraccion",
+        expected_step_order=[
+            "Definir el objetivo y la audiencia",
+            "Documentar el nivel conceptual",
+            "Documentar el nivel lógico",
+            "Documentar el nivel de implementación",
+            "Validar la trazabilidad y consistencia",
+        ],
+        expected_elements=[
+            {"name": "Objetivo y audiencia de la documentación", "importance": "important"},
+            {"name": "Nivel conceptual con dominio y capacidades", "importance": "critical"},
+            {"name": "Nivel lógico con componentes, relaciones y contratos", "importance": "critical"},
+            {"name": "Nivel de implementación con tecnologías y configuraciones", "importance": "critical"},
+            {"name": "Trazabilidad y consistencia entre niveles", "importance": "critical"},
+        ],
+    ),
+    EvalSample(
+        question=(
+            "¿Cómo puedo diseñar y evaluar prompts para mejorar la calidad de las "
+            "respuestas de un sistema RAG?"
+        ),
+        ground_truth=(
+            "Definir la tarea y el contrato de salida, separar instrucciones, pregunta y "
+            "contexto recuperado, exigir respuestas sustentadas y manejo de evidencia "
+            "insuficiente, construir casos de prueba y mejorar el prompt con métricas."
+        ),
+        expected_keywords=[
+            "prompt", "RAG", "contexto recuperado", "grounding",
+            "formato de salida", "casos de prueba",
+        ],
+        category="prompt_engineering_rag",
+        expected_step_order=[
+            "Definir la tarea y el contrato de salida",
+            "Estructurar instrucciones, pregunta y contexto",
+            "Definir reglas de grounding",
+            "Crear casos de prueba representativos",
+            "Evaluar resultados e iterar el prompt",
+        ],
+        expected_elements=[
+            {"name": "Tarea y contrato de salida explícitos", "importance": "critical"},
+            {"name": "Separación entre instrucciones, pregunta y contexto", "importance": "critical"},
+            {"name": "Reglas de grounding y contexto insuficiente", "importance": "critical"},
+            {"name": "Casos de prueba representativos", "importance": "critical"},
+            {"name": "Evaluación con métricas e iteración", "importance": "important"},
         ],
     ),
 ]
