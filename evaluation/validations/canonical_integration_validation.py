@@ -8,7 +8,9 @@ the canonical evaluation pipeline.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +27,7 @@ from src.llm_provider import active_model_name
 
 
 REPORT_DIR = Path(config.reports_dir) / "canonical_integration_validation"
+SUITE_VERSION = "canonical_controlled_v2"
 SEMANTIC_METRICS = (
     "grounding",
     "completeness",
@@ -62,6 +65,8 @@ class ControlledCase:
     generated: dict[str, Any]
     score_ranges: dict[str, tuple[float, float]]
     expected_readiness: str
+    focus_metrics: tuple[str, ...] = ()
+    purpose: str = ""
 
 
 STRONG_ROADMAP = {
@@ -174,6 +179,318 @@ POOR_CONTEXTS = [
     _context(4, "A visual rendering without an error is not sufficient validation; compare the measure with known period results."),
 ]
 
+UNSUPPORTED_N8N_ROADMAP = {
+    "title": "Build a Self-Healing Order Workflow in n8n",
+    "steps": [
+        _step(1, "Define the order workflow", "Define the order payload, routing result, and successful processing outcome.", ["order payload", "routing result"], "inicio"),
+        _step(2, "Receive orders", "Create a Webhook trigger and accept new order payloads.", ["Webhook", "order payload"]),
+        _step(3, "Enable predictive routing", "Use the built-in Quantum Router node to predict the perfect fulfillment path with no configuration or training data.", ["Quantum Router", "perfect prediction"]),
+        _step(4, "Guarantee automatic recovery", "Enable n8n's Autonomous Repair mode so every failed node fixes its own credentials and payload mappings.", ["Autonomous Repair", "credential repair"]),
+        _step(5, "Store the routed order", "Write the automatically corrected order to the operations database.", ["database", "corrected order"]),
+        _step(6, "Confirm autonomous operation", "Run one order and approve the workflow if the execution reaches the final node.", ["single execution", "final node"], "fin"),
+    ],
+}
+
+UNSUPPORTED_N8N_CONTEXTS = [
+    _context(1, "An n8n Webhook node can receive an order payload and start a workflow."),
+    _context(2, "Use explicit IF or Switch conditions to route orders from known payload fields."),
+    _context(3, "Error workflows, retries, and logged failure details should be configured explicitly."),
+    _context(4, "Database nodes require valid credentials and explicit field mappings."),
+    _context(5, "n8n does not provide built-in Quantum Router or Autonomous Repair nodes; routing and recovery require explicit workflow logic."),
+]
+
+INCOMPLETE_POWER_BI_ROADMAP = {
+    "title": "Start a Power BI Sales Model",
+    "steps": [
+        _step(1, "Define the first sales view", "Identify revenue by month as the initial report output.", ["monthly revenue"], "inicio"),
+        _step(2, "Import sales data", "Load the Sales and Product tables with Power Query.", ["Sales", "Product", "Power Query"]),
+        _step(3, "Clean source columns", "Set data types, remove invalid rows, and standardize product identifiers.", ["data types", "invalid rows", "product IDs"]),
+        _step(4, "Create a basic relationship", "Relate Product[ProductKey] to Sales[ProductKey] and verify cardinality.", ["relationship", "cardinality"]),
+        _step(5, "Create total revenue", "Define and validate a SUM-based Total Revenue measure.", ["SUM", "Total Revenue"]),
+        _step(6, "Review the initial visual", "Build a monthly revenue chart and verify it against the cleaned source total.", ["monthly chart", "source total"], "fin"),
+    ],
+}
+
+INCOMPLETE_POWER_BI_CONTEXTS = [
+    _context(1, "Power Query can load Sales and Product tables, assign data types, remove invalid rows, and standardize product identifiers."),
+    _context(2, "Relate Product[ProductKey] to Sales[ProductKey] with validated cardinality as part of a sales model."),
+    _context(3, "Total Revenue can be implemented as a SUM-based explicit measure and checked in a monthly chart against a known source total."),
+    _context(4, "A production Power BI model also requires defined business requirements, a complete star schema, security, refresh, performance testing, user validation, and deployment."),
+]
+
+VAGUE_ABSTRACTION_ROADMAP = {
+    "title": "Apply Abstraction Levels to an API",
+    "steps": [
+        _step(1, "Understand the context", "Think about the API and what matters before beginning.", ["context"], "inicio"),
+        _step(2, "Consider abstraction levels", "Review the conceptual, logical, and implementation levels carefully.", ["conceptual", "logical", "implementation"]),
+        _step(3, "Improve the conceptual design", "Use suitable ideas to make the high-level design better.", ["high-level design"]),
+        _step(4, "Improve the logical design", "Apply appropriate improvements to resources and interactions.", ["resources", "interactions"]),
+        _step(5, "Handle implementation", "Complete the technical details using best practices.", ["technical details", "best practices"]),
+        _step(6, "Review the result", "Check everything carefully and finish when it looks acceptable.", ["review"], "fin"),
+    ],
+}
+
+VAGUE_ABSTRACTION_CONTEXTS = [
+    _context(1, "Conceptual abstraction defines domain goals and capabilities without transport details."),
+    _context(2, "Logical abstraction maps capabilities to resources, operations, boundaries, and contracts."),
+    _context(3, "Implementation abstraction defines endpoints, schemas, authentication, errors, and deployment details."),
+]
+
+OUT_OF_ORDER_N8N_ROADMAP = {
+    "title": "Automate Invoice Delivery in n8n",
+    "steps": [
+        _step(1, "Define the invoice outcome", "Specify the source order, generated PDF, recipient, and delivery confirmation.", ["order", "PDF", "confirmation"], "inicio"),
+        _step(2, "Activate the workflow", "Activate the production workflow before its trigger, credentials, and mappings are configured.", ["activate production"]),
+        _step(3, "Send the invoice email", "Send the invoice attachment before the PDF has been generated or the recipient has been validated.", ["email", "attachment"]),
+        _step(4, "Generate the invoice PDF", "Create the invoice PDF from the normalized order fields.", ["PDF", "normalized fields"]),
+        _step(5, "Normalize the incoming order", "Map customer, line-item, tax, and email fields from the webhook payload.", ["field mapping", "webhook payload"]),
+        _step(6, "Configure the webhook and credentials", "Create the trigger and configure the PDF, email, and storage credentials.", ["Webhook", "credentials"]),
+        _step(7, "Validate delivery", "Run a test order and confirm the stored PDF and delivery event.", ["test order", "delivery event"], "fin"),
+    ],
+}
+
+OUT_OF_ORDER_N8N_CONTEXTS = [
+    _context(1, "Configure triggers and credentials before activating an n8n workflow."),
+    _context(2, "Normalize and validate order fields before generating an invoice document."),
+    _context(3, "Generate the invoice PDF before attaching it to an email."),
+    _context(4, "Validate the complete workflow with a controlled order before production activation."),
+]
+
+WEAK_STRUCTURE_DAX_ROADMAP = {
+    "title": "DAX Running Totals",
+    "steps": [
+        _step(1, "Write the final running-total measure", "Create the cumulative measure immediately with CALCULATE and a date filter.", ["CALCULATE", "date filter"], "inicio"),
+        _step(2, "Dates", "Create a calendar, mark it as a date table, relate it to the fact table, inspect missing dates, decide fiscal boundaries, and document ownership.", ["calendar", "relationship", "fiscal boundaries"]),
+        _step(3, "Check one total", "Compare the measure with one manually calculated period.", ["manual comparison"]),
+        _step(4, "Discuss filter context", "Explain row context, filter context, context transition, and unrelated iterator behavior in detail.", ["filter context", "iterators"]),
+        _step(5, "Add the base measure", "Create and validate the base amount measure used by the running total.", ["base measure"]),
+        _step(6, "Save the file", "Save the PBIX and continue improving it later.", ["save PBIX"], "fin"),
+    ],
+}
+
+WEAK_STRUCTURE_DAX_CONTEXTS = [
+    _context(1, "A running-total roadmap should frame the required result before implementation."),
+    _context(2, "Create and validate the date model and base measure before the cumulative measure."),
+    _context(3, "Meaningful closure validates the result across known periods and documents completion criteria."),
+]
+
+OVERLAPPING_POWER_BI_ROADMAP = {
+    "title": "Create an Executive KPI Page in Power BI",
+    "steps": [
+        _step(1, "Define executive KPIs", "List revenue, margin, growth, and target attainment with their business definitions.", ["revenue", "margin", "growth", "targets"], "inicio"),
+        _step(2, "Define KPI calculations", "Document the formulas and business definitions for revenue, margin, growth, and target attainment.", ["revenue", "margin", "growth", "targets"]),
+        _step(3, "Create KPI measures", "Implement DAX measures for revenue, margin, growth, and target attainment.", ["DAX measures", "KPIs"]),
+        _step(4, "Implement KPI calculations", "Build the DAX calculations for revenue, margin, growth, and target attainment and format their outputs.", ["DAX calculations", "formatting"]),
+        _step(5, "Build the executive page", "Place the four KPI measures in cards and add trend and target comparisons.", ["cards", "trends", "targets"]),
+        _step(6, "Review KPI correctness", "Validate each KPI against an approved source and record the result.", ["approved source", "validation"]),
+        _step(7, "Validate the KPI page", "Compare every KPI with the approved source and record whether each result is correct.", ["approved source", "validation result"], "fin"),
+    ],
+}
+
+OVERLAPPING_POWER_BI_CONTEXTS = [
+    _context(1, "Executive KPI reports require agreed business definitions before DAX implementation."),
+    _context(2, "Create explicit measures, present trends and targets, and validate results against approved sources."),
+]
+
+INVALID_SCHEMA_ROADMAP = {
+    "title": "",
+    "steps": [
+        {
+            "id": "duplicate",
+            "label": "Define the automation goal",
+            "description": "Define the source event and expected notification.",
+            "type": "start",
+            "key_points": "source event",
+        },
+        {
+            "id": "duplicate",
+            "label": "Build the workflow",
+            "description": "Connect the trigger, transformation, and notification nodes.",
+            "type": "proceso",
+            "key_points": ["trigger", "transformation", "notification"],
+        },
+        {
+            "id": "step_3",
+            "label": "Validate the workflow",
+            "description": "Run a controlled event and confirm the notification payload.",
+            "type": "finish",
+        },
+    ],
+}
+
+INVALID_SCHEMA_CONTEXTS = [
+    _context(1, "An automation roadmap can define its trigger, transformations, notification, and validation outcome."),
+]
+
+MIXED_REVIEW_N8N_ROADMAP = {
+    "title": "Synchronize Qualified Leads with a CRM in n8n",
+    "steps": [
+        _step(1, "Define the synchronization goal", "Identify the lead source, CRM destination, qualification rule, and required CRM record.", ["lead source", "CRM", "qualification rule"], "inicio"),
+        _step(2, "Receive lead events", "Configure a Webhook node and capture representative payloads for mapping.", ["Webhook", "sample payloads"]),
+        _step(3, "Normalize lead fields", "Map identity, company, source, and consent fields into one internal payload.", ["field mapping", "consent"]),
+        _step(4, "Check lead quality", "Use an IF node to apply the main qualification rule, but leave edge-case handling for later refinement.", ["IF node", "qualification", "edge cases"]),
+        _step(5, "Create or update the CRM record", "Use the CRM node to upsert the normalized lead by email.", ["upsert", "email"]),
+        _step(6, "Add basic failure handling", "Configure a retry path and notify the owner, without yet defining retry limits or escalation timing.", ["retry", "notification"]),
+        _step(7, "Validate and monitor the workflow", "Test accepted and rejected leads, confirm CRM results, and review execution logs during the initial rollout.", ["test leads", "CRM results", "execution logs"], "fin"),
+    ],
+}
+
+MIXED_REVIEW_N8N_CONTEXTS = [
+    _context(1, "An n8n Webhook can receive lead events and representative payloads can be captured for field mapping."),
+    _context(2, "Normalize identity, company, source, and consent fields before applying an explicit IF-based qualification rule."),
+    _context(3, "A CRM node can create or update a normalized lead using email as a stable lookup key."),
+    _context(4, "Failure handling can retry failed operations and notify an owner; production use should define retry limits and escalation timing."),
+    _context(5, "Validate accepted and rejected leads, confirm CRM records, and review n8n execution logs during rollout."),
+    _context(6, "Reliable lead synchronization should also define duplicate handling and representative edge cases."),
+]
+
+
+def _coverage_universe(
+    *,
+    critical: list[str],
+    important: list[str] | None = None,
+    supporting: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Create a stable, human-authored Completeness reference."""
+    elements = []
+    for importance, names in (
+        ("critical", critical),
+        ("important", important or []),
+        ("supporting", supporting or []),
+    ):
+        for name in names:
+            elements.append({
+                "id": f"expected_{len(elements) + 1}",
+                "name": name,
+                "importance": importance,
+            })
+    return elements
+
+
+def _controlled_case(
+    *,
+    name: str,
+    question: str,
+    ground_truth: str,
+    expected_keywords: list[str],
+    expected_elements: list[dict[str, str]],
+    category: str,
+    expected_step_order: list[str],
+    roadmap: dict[str, Any],
+    contexts: list[dict[str, str]],
+    score_ranges: dict[str, tuple[float, float]],
+    expected_readiness: str,
+    focus_metrics: tuple[str, ...],
+    purpose: str,
+) -> ControlledCase:
+    """Build a controlled case while keeping generator metadata consistent."""
+    return ControlledCase(
+        name=name,
+        sample=EvalSample(
+            question=question,
+            ground_truth=ground_truth,
+            expected_keywords=expected_keywords,
+            category=category,
+            expected_step_order=expected_step_order,
+            expected_elements=expected_elements,
+        ),
+        generated={
+            "question": question,
+            "refined_question": question,
+            "query_intent": {"intent": "implementation"},
+            "contexts": contexts,
+            "corpus_contexts": contexts,
+            "web_contexts": [],
+            "retrieval": {"context_strategy": "controlled", "n_contexts": len(contexts)},
+            "judge_context_strategy": "controlled_same_context",
+            "roadmap": roadmap,
+            "answer": f"Controlled synthetic roadmap: {name}.",
+        },
+        score_ranges=score_ranges,
+        expected_readiness=expected_readiness,
+        focus_metrics=focus_metrics,
+        purpose=purpose,
+    )
+
+
+def _case_manifest(cases: list[ControlledCase]) -> list[dict[str, Any]]:
+    """Describe and fingerprint controlled inputs without exposing credentials."""
+    manifest = []
+    for case in cases:
+        fingerprint_source = {
+            "name": case.name,
+            "question": case.sample.question,
+            "ground_truth": case.sample.ground_truth,
+            "expected_keywords": case.sample.expected_keywords,
+            "expected_elements": case.sample.expected_elements,
+            "expected_step_order": case.sample.expected_step_order,
+            "roadmap": case.generated["roadmap"],
+            "contexts": case.generated.get("contexts", []),
+            "focus_metrics": case.focus_metrics,
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                fingerprint_source,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        manifest.append({
+            "name": case.name,
+            "question": case.sample.question,
+            "focus_metrics": list(case.focus_metrics),
+            "purpose": case.purpose,
+            "expected_readiness": case.expected_readiness,
+            "diagnostic_score_ranges": {
+                name: list(bounds) for name, bounds in case.score_ranges.items()
+            },
+            "fingerprint_sha256": fingerprint,
+        })
+    return manifest
+
+
+def _execution_config() -> dict[str, Any]:
+    """Capture provider-neutral settings that can explain run variation."""
+    return {
+        "provider": os.getenv("LLM_PROVIDER", "bedrock").strip().lower(),
+        "model": active_model_name(),
+        "judge_temperature": config.judge_temperature,
+        "judge_reasoning_mode": os.getenv(
+            "LLM_JUDGE_REASONING_MODE", "disabled"
+        ).strip().lower(),
+        "request_timeout_seconds": os.getenv("LLM_REQUEST_TIMEOUT", "300").strip(),
+        "ollama_seed": os.getenv("OLLAMA_SEED", "").strip() or None,
+        "metric_contract": "canonical_v1",
+        "evaluation_source_sha256": _evaluation_source_fingerprint(),
+    }
+
+
+def _evaluation_source_fingerprint() -> str:
+    """Fingerprint metric implementation files that affect controlled evidence."""
+    evaluation_dir = Path(__file__).resolve().parents[1]
+    relative_paths = (
+        "metric_contract.py",
+        "metric_orchestrator.py",
+        "readiness.py",
+        "structured_output.py",
+        "metrics/actionability_judge.py",
+        "metrics/completeness_judge.py",
+        "metrics/grounding_judge.py",
+        "metrics/logical_order_judge.py",
+        "metrics/step_semantic_judge.py",
+        "metrics/structure_quality_judge.py",
+        "metrics/structure_validator.py",
+    )
+    digest = hashlib.sha256()
+    for relative_path in relative_paths:
+        path = evaluation_dir / relative_path
+        digest.update(relative_path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
 
 CASES = {
     "strong": ControlledCase(
@@ -186,6 +503,16 @@ CASES = {
                 "and validate known periods before reuse."
             ),
             expected_keywords=["date table", "Total Sales", "SAMEPERIODLASTYEAR", "DIVIDE", "validate"],
+            expected_elements=_coverage_universe(
+                critical=[
+                    "Continuous marked date table with an active sales-date relationship",
+                    "Validated base sales measure",
+                    "Explicit prior-year sales measure",
+                    "Explicit year-over-year percentage measure",
+                    "Validation against periods with known results",
+                ],
+                important=["Clear comparison goal", "Reuse only after validation"],
+            ),
             category="dax_power_bi",
             expected_step_order=[
                 "Define the comparison goal",
@@ -210,6 +537,8 @@ CASES = {
         },
         score_ranges={name: (8.0, 10.0) for name in SEMANTIC_METRICS} | {"schema_validity": (7.0, 10.0)},
         expected_readiness="READY",
+        focus_metrics=SEMANTIC_METRICS,
+        purpose="Positive cross-metric reference with supported, complete, executable, ordered, structured, and distinct content.",
     ),
     "poor": ControlledCase(
         name="poor_cross_metric_dax",
@@ -220,6 +549,16 @@ CASES = {
                 "and YoY measures, known-period validation, and publication only after validation."
             ),
             expected_keywords=["date table", "base measure", "prior year", "YoY", "validation"],
+            expected_elements=_coverage_universe(
+                critical=[
+                    "Continuous marked date table with an active sales-date relationship",
+                    "Validated base sales measure",
+                    "Explicit prior-year sales measure",
+                    "Explicit year-over-year percentage measure",
+                    "Validation against periods with known results",
+                ],
+                important=["Clear comparison goal", "Publish only after validation"],
+            ),
             category="dax_power_bi",
             expected_step_order=[
                 "Define the comparison goal",
@@ -247,11 +586,178 @@ CASES = {
             "completeness": (0.0, 4.9),
             "actionability": (5.0, 7.9),
             "logical_order": (0.0, 4.9),
-            "structure_quality": (5.0, 7.9),
+            "structure_quality": (0.0, 4.9),
             "step_distinctness": (5.0, 7.9),
             "schema_validity": (7.0, 10.0),
         },
         expected_readiness="FAIL",
+        focus_metrics=SEMANTIC_METRICS,
+        purpose="Negative cross-metric reference containing several independent quality failures.",
+    ),
+    "unsupported_grounding": _controlled_case(
+        name="unsupported_but_structured_n8n",
+        question="How do I build a reliable order-routing workflow in n8n?",
+        ground_truth="Receive orders with a webhook, validate fields, route with explicit conditions, persist the result, and configure observable error handling.",
+        expected_keywords=["Webhook", "validation", "routing", "database", "error handling"],
+        expected_elements=_coverage_universe(
+            critical=["Webhook order intake", "Payload validation", "Explicit routing rules", "Persisted routing result"],
+            important=["Observable error handling", "Controlled end-to-end validation"],
+        ),
+        category="n8n",
+        expected_step_order=["Define the workflow", "Receive and validate orders", "Route with explicit rules", "Store results", "Handle errors", "Validate"],
+        roadmap=UNSUPPORTED_N8N_ROADMAP,
+        contexts=UNSUPPORTED_N8N_CONTEXTS,
+        score_ranges={
+            "grounding": (0.0, 4.9),
+            "logical_order": (8.0, 10.0),
+            "schema_validity": (7.0, 10.0),
+        },
+        expected_readiness="FAIL",
+        focus_metrics=("grounding",),
+        purpose="Verify that unsupported core claims lower Grounding while the roadmap remains technically valid.",
+    ),
+    "incomplete": _controlled_case(
+        name="accurate_but_incomplete_power_bi",
+        question="How do I build a production-ready Power BI sales model?",
+        ground_truth="Define requirements, prepare data, build a star schema, create and validate measures, configure security and refresh, test performance, validate with users, and deploy.",
+        expected_keywords=["star schema", "DAX", "RLS", "refresh", "performance", "deployment"],
+        expected_elements=_coverage_universe(
+            critical=["Defined business requirements", "Production star schema", "Validated business measures", "Security and refresh configuration", "Business validation and deployment"],
+            important=["Data preparation", "Performance testing"],
+        ),
+        category="power_bi",
+        expected_step_order=["Define requirements", "Prepare data", "Build the model", "Create measures", "Configure security and refresh", "Test performance", "Validate", "Deploy"],
+        roadmap=INCOMPLETE_POWER_BI_ROADMAP,
+        contexts=INCOMPLETE_POWER_BI_CONTEXTS,
+        score_ranges={
+            "completeness": (0.0, 4.9),
+            "logical_order": (8.0, 10.0),
+            "schema_validity": (7.0, 10.0),
+        },
+        expected_readiness="FAIL",
+        focus_metrics=("completeness",),
+        purpose="Verify that a coherent partial solution is penalized for missing production-critical coverage.",
+    ),
+    "vague_actionability": _controlled_case(
+        name="vague_abstraction_actions",
+        question="How do I apply abstraction levels when designing an API?",
+        ground_truth="Define domain capabilities conceptually, map them to logical resources and contracts, implement concrete endpoints and schemas, and validate traceability between levels.",
+        expected_keywords=["conceptual", "logical", "implementation", "resources", "endpoints", "validation"],
+        expected_elements=_coverage_universe(
+            critical=["Conceptual domain capabilities", "Logical resources and contracts", "Implementation endpoints and schemas", "Traceability across abstraction levels"],
+            important=["Explicit design goal and boundaries"],
+        ),
+        category="abstraction",
+        expected_step_order=["Frame the domain goal", "Model capabilities", "Define logical resources", "Specify implementation contracts", "Validate traceability"],
+        roadmap=VAGUE_ABSTRACTION_ROADMAP,
+        contexts=VAGUE_ABSTRACTION_CONTEXTS,
+        score_ranges={
+            "actionability": (5.0, 7.9),
+            "logical_order": (8.0, 10.0),
+            "schema_validity": (7.0, 10.0),
+        },
+        expected_readiness="FAIL",
+        focus_metrics=("actionability",),
+        purpose="Verify that generic actions without a usable method or done condition lower Actionability.",
+    ),
+    "out_of_order": _controlled_case(
+        name="dependency_reversed_n8n",
+        question="How do I automate invoice generation and delivery in n8n?",
+        ground_truth="Configure the trigger and credentials, normalize and validate order data, generate the PDF, send it, validate delivery, and activate only after successful testing.",
+        expected_keywords=["Webhook", "credentials", "mapping", "PDF", "email", "validation"],
+        expected_elements=_coverage_universe(
+            critical=["Configured trigger and credentials", "Normalized and validated order data", "Generated invoice PDF", "Invoice delivery", "End-to-end validation before activation"],
+        ),
+        category="n8n",
+        expected_step_order=["Define the outcome", "Configure trigger and credentials", "Normalize data", "Generate PDF", "Send email", "Validate", "Activate"],
+        roadmap=OUT_OF_ORDER_N8N_ROADMAP,
+        contexts=OUT_OF_ORDER_N8N_CONTEXTS,
+        score_ranges={"logical_order": (0.0, 4.9), "schema_validity": (7.0, 10.0)},
+        expected_readiness="FAIL",
+        focus_metrics=("logical_order",),
+        purpose="Verify that explicit prerequisite inversions lower Logical Order.",
+    ),
+    "weak_structure": _controlled_case(
+        name="poorly_shaped_dax_learning_path",
+        question="How do I learn to create running totals in DAX?",
+        ground_truth="Frame the cumulative-analysis goal, prepare the date model, validate a base measure, implement the running total, test filter behavior, and close with known-period validation.",
+        expected_keywords=["date table", "base measure", "CALCULATE", "filter context", "validation"],
+        expected_elements=_coverage_universe(
+            critical=["Cumulative-analysis goal", "Prepared date model", "Validated base measure", "Running-total measure", "Known-period validation"],
+            important=["Filter-context behavior"],
+        ),
+        category="dax_power_bi",
+        expected_step_order=["Define the goal", "Prepare dates", "Create the base measure", "Create the running total", "Validate known periods"],
+        roadmap=WEAK_STRUCTURE_DAX_ROADMAP,
+        contexts=WEAK_STRUCTURE_DAX_CONTEXTS,
+        score_ranges={
+            "logical_order": (5.0, 7.9),
+            "structure_quality": (5.0, 7.9),
+            "schema_validity": (7.0, 10.0),
+        },
+        expected_readiness="FAIL",
+        focus_metrics=("structure_quality",),
+        purpose="Verify that weak framing, mixed granularity, fragmented flow, and weak closure lower Structure Quality.",
+    ),
+    "overlapping_steps": _controlled_case(
+        name="semantically_redundant_power_bi_steps",
+        question="How do I create and validate an executive KPI page in Power BI?",
+        ground_truth="Agree on KPI definitions, implement each measure once, design the executive page, and validate every KPI against an approved source.",
+        expected_keywords=["KPI definitions", "DAX measures", "executive page", "approved source"],
+        expected_elements=_coverage_universe(
+            critical=["Agreed KPI definitions", "Implemented KPI measures", "Executive KPI page", "Validation against an approved source"],
+        ),
+        category="power_bi",
+        expected_step_order=["Define KPIs", "Create measures", "Build the page", "Validate results"],
+        roadmap=OVERLAPPING_POWER_BI_ROADMAP,
+        contexts=OVERLAPPING_POWER_BI_CONTEXTS,
+        score_ranges={
+            "step_distinctness": (5.0, 7.9),
+            "schema_validity": (7.0, 10.0),
+        },
+        expected_readiness="NEEDS_REVIEW",
+        focus_metrics=("step_distinctness",),
+        purpose="Verify that repeated responsibilities are identified as semantic step overlap.",
+    ),
+    "invalid_schema": _controlled_case(
+        name="technically_invalid_roadmap_schema",
+        question="How do I build and validate a simple notification workflow?",
+        ground_truth="Define the trigger and expected notification, build the transformation and notification steps, and validate the output with a controlled event.",
+        expected_keywords=["trigger", "transformation", "notification", "validation"],
+        expected_elements=_coverage_universe(
+            critical=["Defined trigger and notification outcome", "Transformation and notification workflow", "Controlled output validation"],
+        ),
+        category="automation",
+        expected_step_order=["Define the goal", "Build the workflow", "Validate the notification"],
+        roadmap=INVALID_SCHEMA_ROADMAP,
+        contexts=INVALID_SCHEMA_CONTEXTS,
+        score_ranges={"schema_validity": (0.0, 6.9)},
+        expected_readiness="FAIL",
+        focus_metrics=("schema_validity",),
+        purpose="Verify deterministic rejection of malformed roadmap schema independently of semantic quality.",
+    ),
+    "mixed_review": _controlled_case(
+        name="usable_n8n_workflow_needing_review",
+        question="How do I synchronize qualified leads with a CRM using n8n?",
+        ground_truth="Define qualification and duplicate rules, receive and normalize leads, upsert CRM records, handle failures with explicit retry and escalation policy, and validate representative cases.",
+        expected_keywords=["qualification", "mapping", "upsert", "duplicate handling", "retry limits", "validation"],
+        expected_elements=_coverage_universe(
+            critical=["Lead intake and normalized mapping", "Qualification rules", "CRM create-or-update operation", "Representative validation cases"],
+            important=["Duplicate handling", "Explicit retry limits and escalation policy", "Initial monitoring"],
+        ),
+        category="n8n",
+        expected_step_order=["Define rules", "Receive leads", "Normalize fields", "Qualify leads", "Upsert CRM", "Handle failures", "Validate and monitor"],
+        roadmap=MIXED_REVIEW_N8N_ROADMAP,
+        contexts=MIXED_REVIEW_N8N_CONTEXTS,
+        score_ranges={
+            "completeness": (5.0, 7.9),
+            "actionability": (8.0, 10.0),
+            "logical_order": (8.0, 10.0),
+            "schema_validity": (7.0, 10.0),
+        },
+        expected_readiness="NEEDS_REVIEW",
+        focus_metrics=("completeness", "actionability"),
+        purpose="Represent a realistic usable workflow with bounded omissions that should require review rather than fail outright.",
     ),
 }
 
@@ -334,9 +840,13 @@ def run(case_selection: str, metrics: str | None = None) -> dict[str, Any]:
     html_path = REPORT_DIR / f"{stem}.html"
     payload = {
         "suite": "canonical_controlled_integration",
+        "suite_version": SUITE_VERSION,
         "case_selection": case_selection,
+        "case_count": len(selected),
+        "case_manifest": _case_manifest(selected),
         "metrics": metrics or "canonical_default",
         "model": active_model_name(),
+        "execution_config": _execution_config(),
         "generator_calls": 0,
         "controlled_adapter_calls": adapter.query_count,
         "judge": results,
@@ -413,9 +923,13 @@ def combine_existing() -> dict[str, Any]:
     html_path = REPORT_DIR / "canonical_integration_controlled_final.html"
     payload = {
         "suite": "canonical_controlled_integration",
+        "suite_version": SUITE_VERSION,
         "case_selection": "strong+poor",
+        "case_count": 2,
+        "case_manifest": _case_manifest([CASES["strong"], CASES["poor"]]),
         "metrics": "canonical_default",
         "model": active_model_name(),
+        "execution_config": _execution_config(),
         "generator_calls": 0,
         "source": "completed controlled partial runs",
         "judge": results,
@@ -434,7 +948,7 @@ def combine_existing() -> dict[str, Any]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Canonical controlled integration validation")
-    parser.add_argument("--case", choices=("strong", "poor", "all"), default="strong")
+    parser.add_argument("--case", choices=(*CASES.keys(), "all"), default="strong")
     parser.add_argument(
         "--metrics",
         default=None,

@@ -158,6 +158,9 @@ class CanonicalMetricEvaluator:
                     question=question,
                     refined_question=refined_question,
                     ground_truth=ground_truth,
+                    expected_elements=list(
+                        getattr(sample, "expected_elements", []) or []
+                    ),
                 )
             )
             metrics["completeness"] = value["completeness"]
@@ -185,7 +188,10 @@ class CanonicalMetricEvaluator:
                 print("    [Metric] Logical Order...", flush=True)
             value, timings["logical_order"] = self._timed(
                 lambda: self.judges["logical_order"].evaluate(
-                    roadmap, question=question, category=category
+                    roadmap,
+                    question=question,
+                    category=category,
+                    contexts=context_texts,
                 )
             )
             metrics["logical_order"] = value["logical_order"]
