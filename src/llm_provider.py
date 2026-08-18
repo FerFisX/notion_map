@@ -127,6 +127,16 @@ def get_judge_llm(temperature: float = 0.0, max_tokens: int = 4096):
     )
 
 
+def get_generation_llm(temperature: float = 0.1, max_tokens: int = 4096):
+    """Create the roadmap LLM with reasoning controlled independently from judges."""
+    mode = os.getenv("LLM_GENERATION_REASONING_MODE", "provider_default")
+    return get_llm(
+        temperature=temperature,
+        max_tokens=max_tokens,
+        reasoning_mode=mode,
+    )
+
+
 def invoke_llm_text(
     llm: Any,
     prompt: str,

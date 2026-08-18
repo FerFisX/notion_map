@@ -52,6 +52,7 @@ class RagAdapter:
             "corpus_contexts":        trace.get("corpus_contexts", []),
             "web_contexts":           trace.get("web_contexts", []),
             "retrieval":              trace.get("retrieval", {}),
+            "generation_trace":       trace.get("generation_trace", {}),
             "judge_context_strategy": self.context_strategy,
             "roadmap":                roadmap,
         }

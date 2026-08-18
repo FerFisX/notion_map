@@ -59,6 +59,10 @@ def _flatten_metrics(judge: dict, ragas: dict, corpus: dict) -> dict:
         m["response_time.generation_mean_s"] = rt.get("mean_s", 0)
         m["response_time.generation_max_s"] = rt.get("max_s", 0)
         m["response_time.total_wall_s"] = agg.get("total_wall_time_s", 0)
+        for name, values in agg.get("generation_stage_timings", {}).items():
+            stage = name.removesuffix("_s")
+            m[f"generation.{stage}.mean_s"] = values.get("mean_s", 0)
+            m[f"generation.{stage}.max_s"] = values.get("max_s", 0)
         for name, values in agg.get("metric_timings", {}).items():
             m[f"response_time.{name}.mean_s"] = values.get("mean_s", 0)
             m[f"response_time.{name}.max_s"] = values.get("max_s", 0)
@@ -121,3 +125,38 @@ def log_evaluation(
 
     print(f"  [MLflow] Run '{run_name}' registrado ({len(metrics)} métricas).")
     print(f"  [MLflow] Dashboard: python -m mlflow ui --backend-store-uri \"{TRACKING_URI}\"")
+
+
+def log_generation_benchmark(
+    run_name: str,
+    params: dict,
+    metrics: dict[str, float],
+    artifacts: list[str] | None = None,
+    enabled: bool = True,
+) -> None:
+    """Persist a generation-only benchmark without fabricating judge results."""
+    if not enabled:
+        return
+    if not mlflow_available():
+        print("  [MLflow] no instalado — benchmark no registrado.")
+        return
+
+    import mlflow
+
+    os.makedirs(ARTIFACT_DIR, exist_ok=True)
+    mlflow.set_tracking_uri(TRACKING_URI)
+    if mlflow.get_experiment_by_name(EXPERIMENT) is None:
+        mlflow.create_experiment(
+            EXPERIMENT, artifact_location=Path(ARTIFACT_DIR).as_uri()
+        )
+    mlflow.set_experiment(EXPERIMENT)
+    with mlflow.start_run(run_name=run_name):
+        mlflow.set_tag("run_family", "roadmap_generation_benchmark")
+        mlflow.log_params({key: str(value) for key, value in params.items()})
+        if metrics:
+            mlflow.log_metrics(metrics)
+        for path in artifacts or []:
+            if path and os.path.exists(path):
+                mlflow.log_artifact(path)
+
+    print(f"  [MLflow] Benchmark '{run_name}' registrado ({len(metrics)} métricas).")

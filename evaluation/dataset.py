@@ -17,6 +17,8 @@ class EvalSample:
     # ^ pasos esperados en orden lógico (para validar secuencia)
     expected_elements: List[dict[str, Any]] = field(default_factory=list)
     # ^ universo opcional y estable para evaluar cobertura con Completeness
+    requires_web: bool = False
+    # ^ el benchmark de generación debe verificar uso real de contexto web
 
 
 EVAL_SAMPLES: List[EvalSample] = [
@@ -360,5 +362,58 @@ EVAL_SAMPLES: List[EvalSample] = [
             {"name": "Casos de prueba representativos", "importance": "critical"},
             {"name": "Evaluación con métricas e iteración", "importance": "important"},
         ],
+    ),
+
+    # Casos actuales para validar el fallback web de generación
+    EvalSample(
+        question=(
+            "¿Cómo puedo actualizar una integración tras el lanzamiento de GPT-5.6 "
+            "del 9 de julio de 2026 para elegir entre gpt-5.6-sol, gpt-5.6-terra y "
+            "gpt-5.6-luna, configurar reasoning effort y comparar sus precios actuales?"
+        ),
+        ground_truth=(
+            "Verificar la documentación vigente y los IDs disponibles, comparar el "
+            "alcance y precio actual de Sol, Terra y Luna, configurar reasoning effort "
+            "según la complejidad, y validar calidad, latencia y consumo real de tokens "
+            "antes de actualizar la integración."
+        ),
+        expected_keywords=[
+            "GPT-5.6 Sol", "GPT-5.6 Terra", "GPT-5.6 Luna", "latencia",
+            "costo", "tokens", "evaluación",
+        ],
+        category="openai_current_models",
+        expected_step_order=[
+            "Verificar disponibilidad e IDs vigentes",
+            "Comparar Sol, Terra y Luna",
+            "Configurar reasoning effort",
+            "Estimar costo y latencia actuales",
+            "Probar y actualizar la integración",
+        ],
+        requires_web=True,
+    ),
+    EvalSample(
+        question=(
+            "¿Cómo puedo migrar una aplicación desde GPT-5.4 o GPT-5.5 hacia "
+            "GPT-5.6 y configurar reasoning effort, prompt caching y Responses API?"
+        ),
+        ground_truth=(
+            "Inventariar el modelo y parámetros actuales, seleccionar el tier GPT-5.6, "
+            "migrar mediante Responses API, configurar reasoning effort de forma "
+            "explícita, conservar prefijos estables para prompt caching y comparar "
+            "calidad, latencia, tokens y costo antes del despliegue."
+        ),
+        expected_keywords=[
+            "GPT-5.6", "Responses API", "reasoning effort", "prompt caching",
+            "evaluación", "latencia", "tokens",
+        ],
+        category="openai_current_models",
+        expected_step_order=[
+            "Inventariar la configuración actual",
+            "Seleccionar el modelo GPT-5.6",
+            "Migrar a Responses API",
+            "Configurar reasoning y caching",
+            "Evaluar y desplegar gradualmente",
+        ],
+        requires_web=True,
     ),
 ]
