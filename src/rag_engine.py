@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from typing import List
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -9,7 +10,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
-from src.llm_provider import get_llm, active_model_name
+from src.llm_provider import get_generation_llm, active_model_name
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -36,34 +37,31 @@ WEB_HYBRID_MIN = float(os.getenv("WEB_HYBRID_THRESHOLD", "0.45"))
 # Query refinement experiments.
 # Apagar esto permite reproducir el refinamiento genérico anterior.
 QUERY_INTENT_ENABLED = os.getenv("QUERY_INTENT_ENABLED", "true").lower().strip() in ("true", "1", "yes")
+QUERY_PREPROCESSING_MODE = os.getenv(
+    "QUERY_PREPROCESSING_MODE", "sequential"
+).lower().strip()
+if QUERY_PREPROCESSING_MODE not in {"sequential", "merged"}:
+    raise ValueError("QUERY_PREPROCESSING_MODE must be 'sequential' or 'merged'")
+GENERATION_PROMPT_VERSION = "concise-v2"
 
 
 class RoadmapStep(BaseModel):
-    id: str = Field(description="ID corto único, ej: 'step_1'")
+    id: str = Field(description="Unique short ID, for example 'step_1'.")
     label: str = Field(
-        description="Verbo de acción + objeto específico. Ej: 'Verificar unicidad de atributos' NO 'Revisar el sistema'"
+        description="Concise action verb plus a specific object."
     )
     description: str = Field(
-        description=(
-            "Mínimo 2 oraciones. Explica QUÉ se hace, POR QUÉ es necesario y CÓMO se ejecuta. "
-            "Incluye herramientas, conceptos técnicos o configuraciones reales del contexto. "
-            "PROHIBIDO: frases genéricas como 'este paso es importante' o 'se debe configurar el sistema'."
-        )
+        description="One or two concise sentences explaining what to do, how, and the expected outcome."
     )
-    type: str = Field(description="Tipo del nodo: 'inicio', 'proceso', 'decision', 'fin'")
+    type: str = Field(description="One of: 'inicio', 'proceso', 'decision', 'fin'.")
     key_points: List[str] = Field(
-        description=(
-            "Entre 3 y 5 items OBLIGATORIOS. Cada item es UNO de: "
-            "comando exacto con parámetros, valor de configuración específico, "
-            "advertencia técnica crítica, herramienta con versión, o resultado verificable esperado. "
-            "PROHIBIDO: items vagos como 'tener cuidado' o 'revisar la documentación'."
-        )
+        description="One to three concrete commands, settings, cautions, tools, or verifiable outcomes."
     )
 
 class Roadmap(BaseModel):
-    title: str = Field(description="Título conciso del proceso completo")
+    title: str = Field(description="Concise title for the complete roadmap.")
     steps: List[RoadmapStep] = Field(
-        description="Lista ordenada de 6 a 12 pasos. Cada paso debe ser independiente y verificable."
+        description="Smallest complete ordered set of steps appropriate to the user's objective."
     )
 
 # --- MOTOR RAG ---
@@ -73,8 +71,9 @@ class RagEngine:
         self.vector_db = Chroma(persist_directory=DB_PATH, embedding_function=self.embeddings)
 
         print(f"  Modelo: {active_model_name()}")
-        self.llm = get_llm(temperature=0.1, max_tokens=4096)
+        self.llm = get_generation_llm(temperature=0.1, max_tokens=4096)
         self.parser = JsonOutputParser(pydantic_object=Roadmap)
+        self._last_build_diagnostics = {}
 
     def classify_query_intent(self, raw_query: str) -> dict:
         """
@@ -141,6 +140,84 @@ class RagEngine:
             f"    Confianza: {result.get('confidence'):.2f}"
         )
         return result
+
+    def analyze_and_rewrite_query(self, raw_query: str) -> tuple[dict, str]:
+        """Classify intent and produce the retrieval query in one LLM call."""
+        prompt = f"""\
+        Eres un analista de consultas para un sistema RAG que genera roadmaps técnicos.
+        En una sola operación, clasifica la intención y crea una consulta refinada para
+        recuperar el conocimiento necesario y orientar un roadmap útil.
+
+        Categorías disponibles:
+        - conceptual_learning: aprender, practicar y aplicar un concepto.
+        - implementation: construir, configurar, implementar o aplicar algo.
+        - troubleshooting: diagnosticar un error o comportamiento inesperado.
+        - comparison: comparar alternativas mediante criterios y casos de uso.
+        - optimization: mejorar rendimiento, calidad, costo o precisión.
+        - exploratory: explorar de forma ordenada una intención amplia o ambigua.
+
+        Reglas para refined_query:
+        - Hazla específica, técnica y adecuada para búsqueda semántica.
+        - Mantén el idioma original y el objetivo real del usuario.
+        - Conserva literalmente versiones, fechas, IDs de modelos, APIs y parámetros.
+        - No inventes expansiones ni significados para nombres propios o identificadores.
+        - Añade solo términos que ayuden a recuperar evidencia relevante.
+
+        Responde SOLO con JSON válido:
+        {{
+          "intent": "<una categoría>",
+          "roadmap_goal": "<objetivo accionable>",
+          "retrieval_focus": "<conocimiento que debe recuperarse>",
+          "generation_guidance": "<dirección que debe seguir el roadmap>",
+          "refined_query": "<consulta técnica refinada>",
+          "confidence": <número entre 0 y 1>
+        }}
+
+        Consulta original:
+        {raw_query}
+        """
+        default = {
+            "intent": "exploratory",
+            "roadmap_goal": raw_query,
+            "retrieval_focus": raw_query,
+            "generation_guidance": "Construye un roadmap técnico, ordenado y accionable.",
+            "confidence": 0.0,
+        }
+        refined_query = raw_query
+        try:
+            raw = str(self.llm.invoke(prompt).content).strip()
+            if raw.startswith("```"):
+                raw = raw.split("```", 2)[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            raw = raw.strip()
+            if not raw.startswith("{"):
+                start = raw.find("{")
+                end = raw.rfind("}")
+                if start >= 0 and end > start:
+                    raw = raw[start:end + 1]
+            payload = json.loads(raw)
+            refined_query = str(payload.pop("refined_query", "")).strip() or raw_query
+            result = {**default, **payload}
+            result["confidence"] = max(
+                0.0, min(1.0, float(result.get("confidence") or 0.0))
+            )
+        except Exception as exc:
+            print(
+                "  [Query Analysis/Merged] No se pudo analizar "
+                f"({exc}); usando consulta original."
+            )
+            result = default
+
+        print(
+            "  [Query Analysis/Merged]\n"
+            f"    Intent   : {result.get('intent')}\n"
+            f"    Objetivo : {result.get('roadmap_goal')}\n"
+            f"    Original : {raw_query}\n"
+            f"    Mejorada : {refined_query}\n"
+            f"    Confianza: {result.get('confidence'):.2f}"
+        )
+        return result, refined_query
 
     def rewrite_query(self, raw_query: str, query_intent: dict = None) -> str:
         """Expande la consulta del usuario para mejorar el retrieval y el roadmap."""
@@ -279,19 +356,24 @@ class RagEngine:
           - score < WEB_FALLBACK_MIN             -> mayormente web
         Devuelve los contextos separados por origen para poder atribuir cada nodo.
         """
+        retrieval_started = time.perf_counter()
         retrieval = self.retrieve_contexts_scored(refined_query)
+        retrieval_seconds = round(time.perf_counter() - retrieval_started, 4)
         corpus_contexts = [c["text"] for c in retrieval["selected"]]
         scores = [c.get("vector_score") for c in retrieval.get("pool", []) if c.get("vector_score") is not None]
         best   = max(scores) if scores else 0.0
 
         web_contexts = []
+        web_search_seconds = 0.0
         if best >= WEB_HYBRID_MIN:
             mode = "corpus"
         elif WEB_FALLBACK:
             mode = "hybrid" if best >= WEB_FALLBACK_MIN else "web"
             print(f"  [Web Fallback/{mode}] mejor score del corpus={best:.3f}. Complementando con internet...")
             from src.web_search import search_web
+            web_started = time.perf_counter()
             web_contexts = search_web(refined_query, max_results=4)
+            web_search_seconds = round(time.perf_counter() - web_started, 4)
             if not web_contexts:
                 mode = "corpus"  # la búsqueda falló: seguimos solo con corpus
         else:
@@ -303,6 +385,10 @@ class RagEngine:
             "web_contexts":    web_contexts,
             "best_score":      round(best, 3),
             "mode":            mode,
+            "timings": {
+                "retrieval_s": retrieval_seconds,
+                "web_search_s": web_search_seconds,
+            },
         }
 
     def _cosine(self, a, b) -> float:
@@ -361,19 +447,53 @@ class RagEngine:
         usen exactamente la misma consulta refinada y los mismos contextos que
         vio el generador, evitando evaluar contra un retrieval distinto.
         """
+        total_started = time.perf_counter()
+        stage_timings = {
+            "query_preprocessing_s": 0.0,
+            "intent_classification_s": 0.0,
+            "query_refinement_s": 0.0,
+            "retrieval_s": 0.0,
+            "web_search_s": 0.0,
+            "roadmap_generation_s": 0.0,
+            "source_attribution_s": 0.0,
+        }
         try:
-            query_intent = (
-                self.classify_query_intent(query)
-                if QUERY_INTENT_ENABLED
-                else {"intent": "disabled", "confidence": 0.0}
-            )
-            refined_query = self.rewrite_query(query, query_intent=query_intent)
+            if QUERY_INTENT_ENABLED and QUERY_PREPROCESSING_MODE == "merged":
+                preprocessing_started = time.perf_counter()
+                query_intent, refined_query = self.analyze_and_rewrite_query(query)
+                stage_timings["query_preprocessing_s"] = round(
+                    time.perf_counter() - preprocessing_started, 4
+                )
+            else:
+                intent_started = time.perf_counter()
+                query_intent = (
+                    self.classify_query_intent(query)
+                    if QUERY_INTENT_ENABLED
+                    else {"intent": "disabled", "confidence": 0.0}
+                )
+                stage_timings["intent_classification_s"] = round(
+                    time.perf_counter() - intent_started, 4
+                )
+                refinement_started = time.perf_counter()
+                refined_query = self.rewrite_query(query, query_intent=query_intent)
+                stage_timings["query_refinement_s"] = round(
+                    time.perf_counter() - refinement_started, 4
+                )
             print(f"  [Retrieval] Buscando con consulta refinada...")
             src     = self.get_contexts_with_sources(refined_query)
+            stage_timings.update(src.get("timings", {}))
+            generation_started = time.perf_counter()
             roadmap = self.build_roadmap(query, refined_query, src["contexts"], query_intent=query_intent)
+            stage_timings["roadmap_generation_s"] = round(
+                time.perf_counter() - generation_started, 4
+            )
 
             # Atribuir fuente a cada nodo y calcular porcentajes globales
+            attribution_started = time.perf_counter()
             pct = self.attribute_step_sources(roadmap, src["corpus_contexts"], src["web_contexts"])
+            stage_timings["source_attribution_s"] = round(
+                time.perf_counter() - attribution_started, 4
+            )
             roadmap["sources"] = {
                 "corpus_pct":      pct["corpus_pct"],
                 "web_pct":         pct["web_pct"],
@@ -383,6 +503,35 @@ class RagEngine:
                 "n_web_chunks":    len(src["web_contexts"]),
             }
             print(f"  [Fuentes] {pct['corpus_pct']}% corpus / {pct['web_pct']}% web  (modo: {src['mode']})")
+            generation_trace = {
+                "timings": {
+                    **stage_timings,
+                    "total_generation_s": round(
+                        time.perf_counter() - total_started, 4
+                    ),
+                },
+                "provider": os.getenv("LLM_PROVIDER", "bedrock").lower().strip(),
+                "model": active_model_name(),
+                "generation_reasoning_mode": os.getenv(
+                    "LLM_GENERATION_REASONING_MODE", "provider_default"
+                ).lower().strip(),
+                "query_preprocessing_mode": QUERY_PREPROCESSING_MODE,
+                "query_intent_enabled": QUERY_INTENT_ENABLED,
+                "rerank_method": RERANK_METHOD,
+                "retrieval_pool_size": POOL_SIZE,
+                "retrieval_top_n": TOP_N,
+                "web_fallback_enabled": WEB_FALLBACK,
+                "corpus_context_count": len(src["corpus_contexts"]),
+                "web_context_count": len(src["web_contexts"]),
+                "total_context_count": len(src["contexts"]),
+                "context_characters": sum(len(value) for value in src["contexts"]),
+                **self._last_build_diagnostics,
+            }
+            timing_summary = " | ".join(
+                f"{name.removesuffix('_s')}={value:.2f}s"
+                for name, value in generation_trace["timings"].items()
+            )
+            print(f"  [Generation timing] {timing_summary}")
             return {
                 "question":            query,
                 "query_intent":        query_intent,
@@ -397,6 +546,7 @@ class RagEngine:
                     "n_corpus_chunks": len(src["corpus_contexts"]),
                     "n_web_chunks":    len(src["web_contexts"]),
                 },
+                "generation_trace":   generation_trace,
                 "roadmap":             roadmap,
             }
 
@@ -418,6 +568,21 @@ class RagEngine:
                 "corpus_contexts":  [],
                 "web_contexts":     [],
                 "retrieval":        {"mode": "error", "best_score": 0, "n_contexts": 0},
+                "generation_trace": {
+                    "timings": {
+                        **stage_timings,
+                        "total_generation_s": round(
+                            time.perf_counter() - total_started, 4
+                        ),
+                    },
+                    "provider": os.getenv("LLM_PROVIDER", "bedrock").lower().strip(),
+                    "model": active_model_name(),
+                    "generation_reasoning_mode": os.getenv(
+                        "LLM_GENERATION_REASONING_MODE", "provider_default"
+                    ).lower().strip(),
+                    "query_preprocessing_mode": QUERY_PREPROCESSING_MODE,
+                    "error_type": type(e).__name__,
+                },
                 "roadmap":          roadmap,
             }
 
@@ -427,6 +592,7 @@ class RagEngine:
 
     def build_roadmap(self, original_query: str, refined_query: str, contexts: list, query_intent: dict = None):
         """Construye el roadmap con la consulta refinada y los contextos ya recuperados."""
+        self._last_build_diagnostics = {}
         try:
             query_intent = query_intent or {
                 "intent": "exploratory",
@@ -435,73 +601,40 @@ class RagEngine:
             }
             if QUERY_INTENT_ENABLED and query_intent.get("intent") not in ("disabled", "error"):
                 intent_context = (
-                    f"Tipo de intención: {query_intent.get('intent', 'exploratory')}\n"
-                    f"Objetivo accionable: {query_intent.get('roadmap_goal', original_query)}\n"
-                    f"Guía para el roadmap: {query_intent.get('generation_guidance', '')}"
+                    f"Intent: {query_intent.get('intent', 'exploratory')}\n"
+                    f"Goal: {query_intent.get('roadmap_goal', original_query)}\n"
+                    f"Guidance: {query_intent.get('generation_guidance', '')}"
                 )
-                intent_section = f"""\
-═══════════════════════════════════════════════════
-INTENCIÓN Y DIRECCIÓN DEL ROADMAP
-═══════════════════════════════════════════════════
-{intent_context}
-
-"""
+                intent_section = intent_context
             else:
                 intent_context = ""
-                intent_section = ""
+                intent_section = "No additional intent guidance."
             context = "\n\n---\n\n".join(contexts) if contexts else (
                 "No hay contexto específico recuperado. "
                 "Genera pasos basados en conocimiento técnico general del dominio."
             )
 
             template = """\
-Eres un arquitecto técnico senior con experiencia en documentación de procesos empresariales.
-Tu tarea es crear un roadmap TÉCNICO, ESPECÍFICO y ACCIONABLE.
+Create a technical, actionable roadmap in the same language as the user's query.
 
-═══════════════════════════════════════════════════
-CONSULTA ORIGINAL DEL USUARIO
-═══════════════════════════════════════════════════
-{original_query}
+Original query: {original_query}
+Refined query: {refined_query}
+Intent guidance:
+{intent_section}
 
-═══════════════════════════════════════════════════
-CONSULTA ENRIQUECIDA (usa esta para el roadmap)
-═══════════════════════════════════════════════════
-{refined_query}
-
-═══════════════════════════════════════════════════
-{intent_section}═══════════════════════════════════════════════════
-CONTEXTO TÉCNICO RECUPERADO DE LA BASE DE CONOCIMIENTO
-═══════════════════════════════════════════════════
+Retrieved evidence:
 {context}
 
-═══════════════════════════════════════════════════
-ESTÁNDARES DE CALIDAD OBLIGATORIOS
-═══════════════════════════════════════════════════
-
-PARA CADA PASO — EXIGENCIAS MÍNIMAS:
-
-  label:
-    ✅ "Verificar la propiedad de unicidad en cada columna candidata"
-    ❌ "Verificar datos"
-
-  description (mínimo 2 oraciones):
-    ✅ "Se comprueba que ningún valor se repite en la columna candidata usando
-        la restricción UNIQUE. Esta propiedad garantiza que cada fila pueda
-        ser identificada de forma inequívoca sin depender de otras columnas."
-    ❌ "Este paso es importante para el proceso."
-
-  key_points (3 a 5 items, cada uno concreto):
-    ✅ ["Consulta SQL: SELECT col, COUNT(*) FROM tabla GROUP BY col HAVING COUNT(*) > 1",
-        "CUIDADO: NULL no viola unicidad en algunos motores (PostgreSQL, MySQL)",
-        "Resultado esperado: cero filas duplicadas en la columna candidata"]
-    ❌ ["Tener cuidado", "Revisar documentación", "Es importante"]
-
-REGLAS GENERALES:
-  - Genera entre 6 y 12 pasos (ni muy pocos ni demasiados)
-  - Prioriza información del contexto recuperado sobre conocimiento genérico
-  - Si el contexto no cubre un paso, indícalo: "[inferido]" al inicio del label
-  - Cada paso debe ser ejecutable de forma independiente y verificable
-  - NUNCA uses frases de relleno ni pasos obvios sin detalle técnico
+Requirements:
+- Use the smallest complete number of steps appropriate to the objective; do not target a fixed count.
+- Order steps by real dependencies. Keep responsibilities distinct and avoid duplicated work.
+- Use exactly one `inicio` as the first step and one `fin` as the last step. Use `decision` only for a real branch.
+- Make every label specific and every description concise, actionable, and verifiable.
+- Include only useful key points such as commands, settings, cautions, tools, or expected outcomes.
+- Prefer retrieved evidence. Prefix unsupported but necessary steps with `[inferido]`.
+- Every step must contain `id`, `label`, `description`, `type`, and `key_points`; never emit an empty or partial step.
+- Complete and close the full JSON object before finishing the response.
+- Return only valid JSON matching the schema. Do not add commentary.
 
 {format_instructions}
 """
@@ -511,12 +644,25 @@ REGLAS GENERALES:
                 partial_variables={"format_instructions": self.parser.get_format_instructions()},
             )
 
-            chain = prompt | self.llm | self.parser
-            result = chain.invoke({
+            prompt_inputs = {
                 "original_query": original_query,
                 "refined_query":  refined_query,
                 "intent_section": intent_section,
                 "context":        context,
+            }
+            rendered_prompt = prompt.format_prompt(**prompt_inputs).to_string()
+            self._last_build_diagnostics = {
+                "generation_prompt_version": GENERATION_PROMPT_VERSION,
+                "generation_prompt_characters": len(rendered_prompt),
+                "generation_context_characters": len(context),
+            }
+            chain = prompt | self.llm | self.parser
+            result = chain.invoke(prompt_inputs)
+            self._last_build_diagnostics.update({
+                "roadmap_output_characters": len(
+                    json.dumps(result, ensure_ascii=False)
+                ),
+                "roadmap_step_count": len(result.get("steps", [])),
             })
             print(f"  [Generación] {len(result.get('steps', []))} pasos generados.")
             return result

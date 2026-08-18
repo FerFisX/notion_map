@@ -292,6 +292,7 @@ class CanonicalMetricEvaluator:
             "answer": generated.get("answer", ""),
             "contexts": contexts,
             "retrieval": generated.get("retrieval", {}),
+            "generation_trace": generated.get("generation_trace", {}),
             "judge_context_strategy": generated.get("judge_context_strategy", ""),
             "roadmap": roadmap,
             "steps": [
@@ -446,6 +447,23 @@ class CanonicalMetricEvaluator:
             for status in ("READY", "NEEDS_REVIEW", "FAIL", "NOT_EVALUATED")
         }
         generation_times = [float(sample.get("response_time", 0)) for sample in per_sample]
+        generation_stage_names = sorted({
+            name
+            for sample in per_sample
+            for name in sample.get("generation_trace", {}).get("timings", {})
+        })
+        generation_stage_timings = {}
+        for name in generation_stage_names:
+            values = [
+                float(sample["generation_trace"]["timings"][name])
+                for sample in per_sample
+                if name in sample.get("generation_trace", {}).get("timings", {})
+            ]
+            generation_stage_timings[name] = {
+                "mean_s": round(sum(values) / len(values), 4),
+                "max_s": round(max(values), 4),
+                "min_s": round(min(values), 4),
+            }
         metric_timing_names = sorted({
             name for sample in per_sample for name in sample.get("metric_timings", {})
         })
@@ -526,6 +544,7 @@ class CanonicalMetricEvaluator:
                 "max_s": round(max(generation_times), 2),
                 "min_s": round(min(generation_times), 2),
             },
+            "generation_stage_timings": generation_stage_timings,
             "metric_timings": metric_timings,
         }
 
