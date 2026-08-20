@@ -35,8 +35,8 @@ from src.llm_provider import get_llm, active_model_name
 
 
 class CriterionScore(BaseModel):
-    score:         int = Field(ge=0, le=10, description="Puntuación 0-10")
-    justification: str = Field(description="Justificación en 1-2 oraciones")
+    score:         int = Field(ge=0, le=10, description="Score from 0 to 10")
+    justification: str = Field(description="Justification in one or two sentences")
 
 
 class ClassicScores(BaseModel):
@@ -46,7 +46,7 @@ class ClassicScores(BaseModel):
     coherence:          CriterionScore
     technical_accuracy: CriterionScore
     context_fidelity:   CriterionScore
-    summary:            str = Field(description="Evaluación general en 2-3 oraciones")
+    summary:            str = Field(description="Overall evaluation in two or three sentences")
 
 
 class SequenceEval(BaseModel):
@@ -55,10 +55,10 @@ class SequenceEval(BaseModel):
     Alimenta la dimensión S del MESE y la tabla de revisión humana.
     """
     score:              int        = Field(ge=0, le=10)
-    is_valid:           bool       = Field(description="True si el orden es aceptable")
-    out_of_order_steps: List[str]  = Field(description="Labels exactos de pasos fuera de orden")
-    suggested_fix:      str        = Field(description="Reordenamiento sugerido o 'Orden correcto'")
-    explanation:        str        = Field(description="Análisis de dependencias causales entre pasos")
+    is_valid:           bool       = Field(description="True when the order is acceptable")
+    out_of_order_steps: List[str]  = Field(description="Exact labels of out-of-order steps")
+    suggested_fix:      str        = Field(description="Suggested reordering or 'Correct order'")
+    explanation:        str        = Field(description="Analysis of causal dependencies between steps")
 
 
 class MESEScores(BaseModel):
@@ -74,110 +74,95 @@ class MESEScores(BaseModel):
     Collectively Exhaustive (juntas cubren toda la calidad del roadmap).
     """
     mapping:               int = Field(ge=0, le=10,
-        description="Grounding — ¿Cada paso está sustentado por el contexto recuperado? NO evalúes cobertura, orden ni claridad")
-    mapping_justification: str = Field(description="Evidencia específica de soporte contextual o afirmaciones no soportadas")
+        description="Grounding — Is every step supported by retrieved context? Do not evaluate coverage, order, or clarity.")
+    mapping_justification: str = Field(description="Specific evidence of contextual support or unsupported claims")
 
     exhaustiveness:               int = Field(ge=0, le=10,
-        description="Completeness — ¿Están todos los pasos necesarios? NO evalúes grounding, orden ni claridad")
-    exhaustiveness_justification: str = Field(description="Pasos faltantes detectados, o 'Cobertura completa'")
+        description="Completeness — Are all necessary steps present? Do not evaluate grounding, order, or clarity.")
+    exhaustiveness_justification: str = Field(description="Detected missing steps, or 'Complete coverage'")
 
     sequence:               int = Field(ge=0, le=10,
-        description="Logical order — ¿El orden respeta dependencias causales? NO evalúes contenido, grounding ni claridad")
-    sequence_justification: str = Field(description="Dependencias causales violadas o 'Dependencias correctas'")
+        description="Logical order — Does the order respect causal dependencies? Do not evaluate content, grounding, or clarity.")
+    sequence_justification: str = Field(description="Violated causal dependencies or 'Correct dependencies'")
 
     experience:               int = Field(ge=0, le=10,
-        description="Actionability — ¿El usuario puede entender y ejecutar cada paso? NO evalúes grounding, cobertura ni orden")
-    experience_justification: str = Field(description="Pasos ambiguos detectados o 'Todos los pasos son accionables'")
+        description="Actionability — Can the user understand and execute every step? Do not evaluate grounding, coverage, or order.")
+    experience_justification: str = Field(description="Detected ambiguous steps or 'All steps are actionable'")
 
-    composite: float = Field(default=0.0, description="Score ponderado (calculado automáticamente)")
+    composite: float = Field(default=0.0, description="Weighted score, calculated automatically")
 
 
 _PROMPT_TEMPLATE = """\
-Eres un evaluador experto en sistemas RAG y roadmaps técnicos.
-Responde ÚNICAMENTE con JSON válido, sin markdown, sin texto adicional.
+You are an expert evaluator of RAG systems and technical roadmaps.
+Return ONLY valid JSON, without markdown or additional text.
 
-═══════════════════════════════════
-PREGUNTA DEL USUARIO
-═══════════════════════════════════
+USER QUESTION
 {question}
 
-═══════════════════════════════════
-CONSULTA REFINADA USADA PARA RECUPERAR CONTEXTO
-═══════════════════════════════════
+REFINED QUERY USED FOR RETRIEVAL
 {refined_question}
 
-═══════════════════════════════════
-CONTEXTO RECUPERADO (RAG)
-═══════════════════════════════════
+RETRIEVED RAG CONTEXT
 {context}
 
-═══════════════════════════════════
-ROADMAP GENERADO
-═══════════════════════════════════
+GENERATED ROADMAP
 {roadmap}
 
-═══════════════════════════════════
-RESPUESTA ESPERADA (ground truth)
-═══════════════════════════════════
+EXPECTED ANSWER (GROUND TRUTH)
 {ground_truth}
 
-═══════════════════════════════════
-PASOS DEL ROADMAP EN ORDEN
-═══════════════════════════════════
+ORDERED ROADMAP STEPS
 {steps_list}
 
-═══════════════════════════════════
-INSTRUCCIONES
-═══════════════════════════════════
+INSTRUCTIONS
 
-SECCIÓN 1 — CRITERIOS CLÁSICOS (0-10):
-  relevance:          ¿Responde directamente la pregunta?
-  completeness:       ¿Incluye todos los pasos esenciales?
-  coherence:          ¿Los pasos están en orden lógico?
-  technical_accuracy: ¿Los detalles técnicos son correctos?
-  context_fidelity:   ¿Se basa en el contexto recuperado, que es el mismo contexto usado por el generador?
-  Escala: 0-3 deficiente | 4-6 aceptable | 7-8 bueno | 9-10 excelente
+SECTION 1 — CLASSIC CRITERIA (0-10)
+  relevance: Does the roadmap answer the question directly?
+  completeness: Does it include every essential step?
+  coherence: Are the steps in logical order?
+  technical_accuracy: Are the technical details correct?
+  context_fidelity: Is it based on the retrieved context, the same context used by the generator?
+  Scale: 0-3 poor | 4-6 acceptable | 7-8 good | 9-10 excellent
 
-SECCIÓN 2 — ANÁLISIS DE SECUENCIA (detallado):
-  Regla de dependencia causal: el paso N NO puede requerir el resultado del paso N+1.
-  Ejemplos de violación: "testear" antes de "crear", "configurar" antes de "instalar".
-  - Lista los pasos fuera de orden por su label EXACTO
-  - Si el orden está bien, pon out_of_order_steps: [] y suggested_fix: "Orden correcto"
+SECTION 2 — DETAILED SEQUENCE ANALYSIS
+  Causal-dependency rule: step N must not require the output of step N+1.
+  Violation examples: testing before creating, or configuring before installing.
+  - List out-of-order steps using their EXACT labels.
+  - If the order is correct, set out_of_order_steps to [] and suggested_fix to "Correct order".
 
-SECCIÓN 3 — DIMENSIONES DE CALIDAD DEL ROADMAP BAJO PRINCIPIO MECE
-(CRÍTICO — cada dimensión es MUTUAMENTE EXCLUSIVA y, en conjunto, COLECTIVAMENTE EXHAUSTIVA):
+SECTION 3 — ROADMAP QUALITY DIMENSIONS UNDER THE MECE PRINCIPLE
+(CRITICAL — every dimension is mutually exclusive and together they are collectively exhaustive)
 
-  IMPORTANTE:
-  El JSON conserva nombres legacy por compatibilidad, pero debes evaluarlos con estos significados nuevos:
+  The JSON preserves legacy names for compatibility. Evaluate them using these meanings:
     mapping        = grounding.support_score
     exhaustiveness = roadmap.completeness
     sequence       = roadmap.logical_order
     experience     = roadmap.actionability
 
-  GROUNDING / SOPORTE CONTEXTUAL (legacy key: mapping):
-    Evalúa SOLO si cada paso del roadmap está sustentado por el CONTEXTO RECUPERADO.
-    Pregúntate: ¿el contexto disponible apoya explícitamente o razonablemente este paso?
-    Penaliza afirmaciones inventadas, detalles técnicos no soportados o pasos que contradicen el contexto.
-    NO penalices por pasos faltantes, orden incorrecto o falta de claridad.
+  GROUNDING / CONTEXTUAL SUPPORT (legacy key: mapping)
+    Evaluate ONLY whether every roadmap step is supported by RETRIEVED CONTEXT.
+    Ask whether the available context explicitly or reasonably supports the step.
+    Penalize invented claims, unsupported technical details, or steps that contradict context.
+    Do NOT penalize missing steps, incorrect order, or lack of clarity.
 
-  COMPLETENESS / COMPLETITUD (legacy key: exhaustiveness):
-    Evalúa SOLO si el roadmap incluye todos los pasos necesarios para resolver la necesidad del usuario.
-    Pregúntate: ¿falta algún paso, concepto, validación, práctica o cierre importante?
-    NO penalices si los pasos existentes tienen bajo grounding, están desordenados o son poco accionables.
+  COMPLETENESS (legacy key: exhaustiveness)
+    Evaluate ONLY whether the roadmap includes every step needed to solve the user's need.
+    Ask whether an important step, concept, validation, practice, or closure is missing.
+    Do NOT penalize weak grounding, incorrect order, or low actionability in existing steps.
 
-  LOGICAL ORDER / ORDEN LÓGICO (legacy key: sequence):
-    Evalúa SOLO si el orden respeta dependencias causales y progresión de aprendizaje/ejecución.
-    Pregúntate: ¿algún paso requiere conocimiento, configuración o resultado que aparece después?
-    NO penalices por grounding bajo, pasos faltantes o vaguedad.
+  LOGICAL ORDER (legacy key: sequence)
+    Evaluate ONLY whether the order respects causal dependencies and learning or execution progression.
+    Ask whether a step needs knowledge, configuration, or an outcome that appears later.
+    Do NOT penalize weak grounding, missing steps, or vagueness.
 
-  ACTIONABILITY / ACCIONABILIDAD (legacy key: experience):
-    Evalúa SOLO si el usuario puede entender y ejecutar cada paso sin confusión.
-    Pregúntate: ¿los pasos indican qué hacer, con qué herramienta/concepto y qué resultado esperar?
-    Penaliza pasos vagos como "aprender lo básico", "configurar el sistema" o "aplicar buenas prácticas"
-    si no explican una acción concreta.
-    NO penalices por grounding, cobertura u orden.
+  ACTIONABILITY (legacy key: experience)
+    Evaluate ONLY whether the user can understand and execute every step without confusion.
+    Ask whether steps state what to do, which tool or concept to use, and the expected outcome.
+    Penalize vague steps such as "learn the basics", "configure the system", or "apply best practices"
+    when they do not explain a concrete action.
+    Do NOT penalize grounding, coverage, or order.
 
-JSON esperado (sin markdown):
+Expected JSON (without markdown):
 {{
   "classic": {{
     "relevance":          {{"score": <0-10>, "justification": "<texto>"}},
@@ -185,24 +170,24 @@ JSON esperado (sin markdown):
     "coherence":          {{"score": <0-10>, "justification": "<texto>"}},
     "technical_accuracy": {{"score": <0-10>, "justification": "<texto>"}},
     "context_fidelity":   {{"score": <0-10>, "justification": "<texto>"}},
-    "summary": "<evaluación general 2-3 frases>"
+    "summary": "<overall evaluation in two or three sentences>"
   }},
   "sequence_eval": {{
     "score": <0-10>,
     "is_valid": <true|false>,
     "out_of_order_steps": ["<label exacto>", ...],
-    "suggested_fix": "<orden corregido o 'Orden correcto'>",
-    "explanation": "<análisis de dependencias causales>"
+    "suggested_fix": "<corrected order or 'Correct order'>",
+    "explanation": "<causal dependency analysis>"
   }},
   "mese": {{
     "mapping":                <0-10, grounding.support_score>,
-    "mapping_justification":  "<soporte contextual o afirmaciones no soportadas>",
+    "mapping_justification":  "<contextual support or unsupported claims>",
     "exhaustiveness":                <0-10, roadmap.completeness>,
-    "exhaustiveness_justification":  "<pasos faltantes o 'Cobertura completa'>",
+    "exhaustiveness_justification":  "<missing steps or 'Complete coverage'>",
     "sequence":                <0-10, roadmap.logical_order>,
-    "sequence_justification":  "<dependencias violadas o 'Dependencias correctas'>",
+    "sequence_justification":  "<violated dependencies or 'Correct dependencies'>",
     "experience":                <0-10, roadmap.actionability>,
-    "experience_justification":  "<pasos vagos/accionables o 'Todos accionables'>",
+    "experience_justification":  "<vague or actionable steps, or 'All steps are actionable'>",
     "composite": 0
   }}
 }}
@@ -226,10 +211,10 @@ class LLMJudgeEvaluator:
         steps_list:   str,
         refined_question: str = "",
     ) -> dict:
-        context_text = "\n---\n".join(contexts) if contexts else "Sin contexto."
+        context_text = "\n---\n".join(contexts) if contexts else "No context available."
         prompt = _PROMPT_TEMPLATE.format(
             question=question,
-            refined_question=refined_question or "(No disponible)",
+            refined_question=refined_question or "(No refined query available.)",
             context=context_text[:3500],
             roadmap=roadmap_text[:2500],
             ground_truth=ground_truth,
