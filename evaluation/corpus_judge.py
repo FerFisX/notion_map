@@ -17,54 +17,54 @@ from src.llm_provider import get_llm, active_model_name
 
 
 _CHUNK_EVAL_PROMPT = """\
-Eres un experto en sistemas RAG. Evalúa el siguiente fragmento de texto
-que forma parte de una base de conocimiento técnica.
+You are an expert in RAG systems. Evaluate the following text fragment from a
+technical knowledge base.
 
-FRAGMENTO:
+FRAGMENT:
 \"\"\"
 {chunk}
 \"\"\"
 
-Evalúa en 3 dimensiones (0-10 cada una):
+Evaluate three dimensions (0-10 each):
 
-1. coherencia: ¿Es el fragmento un texto coherente y completo? ¿Tiene sentido por sí solo?
-   0 = texto roto/ilegible, 10 = unidad de información completa y clara
+1. coherencia: Is the fragment coherent and complete? Does it make sense on its own?
+   0 = broken or unreadable text, 10 = complete and clear unit of information
 
-2. densidad_tecnica: ¿Qué tan rico en información técnica útil es?
-   0 = genérico sin valor, 10 = lleno de conceptos, datos, comandos o procedimientos específicos
+2. densidad_tecnica: How rich is it in useful technical information?
+   0 = generic and unhelpful, 10 = full of specific concepts, data, commands, or procedures
 
-3. utilidad_rag: ¿Qué tan útil sería este fragmento para responder preguntas técnicas?
-   0 = inútil, 10 = altamente informativo para construir respuestas precisas
+3. utilidad_rag: How useful would this fragment be for answering technical questions?
+   0 = useless, 10 = highly informative for producing precise answers
 
-Responde SOLO con JSON válido, sin markdown:
+Return ONLY valid JSON, without markdown. Keep the JSON keys exactly as shown:
 {{
   "coherencia": <0-10>,
   "densidad_tecnica": <0-10>,
   "utilidad_rag": <0-10>,
-  "tema_principal": "<tema en 5 palabras máximo>",
-  "problema_detectado": "<si hay un problema de calidad, describelo en 1 oración; si no, escribe 'ninguno'>"
+  "tema_principal": "<main topic in no more than five words>",
+  "problema_detectado": "<if there is a quality problem, describe it in one sentence; otherwise write 'ninguno'>"
 }}
 """
 
 _COVERAGE_PROMPT = """\
-Eres un experto en sistemas RAG. Tienes los siguientes temas principales
-extraídos de los fragmentos de la base de conocimiento:
+You are an expert in RAG systems. The following main topics were extracted from
+knowledge-base fragments:
 
 {topics}
 
-Evalúa la cobertura temática (0-10):
+Evaluate topical coverage (0-10):
 
-  amplitud: ¿Qué tan amplio es el rango de temas? ¿Hay diversidad?
-  profundidad: ¿Los temas tienen suficiente detalle técnico en conjunto?
-  coherencia_tematica: ¿Los temas están relacionados entre sí o son completamente dispares?
+  amplitud: How broad is the topic range? Is it diverse?
+  profundidad: Do the topics provide enough technical detail collectively?
+  coherencia_tematica: Are the topics related, or are they completely disconnected?
 
-Responde SOLO con JSON válido:
+Return ONLY valid JSON. Keep the JSON keys exactly as shown:
 {{
   "amplitud": <0-10>,
   "profundidad": <0-10>,
   "coherencia_tematica": <0-10>,
-  "temas_unicos_estimados": <numero entero>,
-  "observacion": "<recomendación sobre el corpus en 2 oraciones>"
+  "temas_unicos_estimados": <integer>,
+  "observacion": "<corpus recommendation in two sentences>"
 }}
 """
 

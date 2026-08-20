@@ -83,35 +83,35 @@ class RagEngine:
         de reglas rígidas por palabras clave.
         """
         prompt = f"""\
-        Eres un analista de intención para un sistema RAG que genera roadmaps técnicos.
-        Clasifica la consulta del usuario y define cómo debe transformarse para construir
-        un roadmap útil.
+        You are an intent analyst for a RAG system that generates technical roadmaps.
+        Classify the user's query and determine how it should be transformed into a
+        useful roadmap.
 
-        Categorías disponibles:
-        - conceptual_learning: el usuario pregunta qué es/qué son/para qué sirve algo y necesita convertirlo en un proceso de aprendizaje aplicable.
-        - implementation: el usuario quiere construir, configurar, implementar o aplicar algo.
-        - troubleshooting: el usuario tiene un error, bloqueo o comportamiento inesperado.
-        - comparison: el usuario quiere comparar alternativas, enfoques o herramientas.
-        - optimization: el usuario quiere mejorar rendimiento, calidad, costos o precisión.
-        - exploratory: la intención es amplia o ambigua y necesita exploración ordenada.
+        Available categories:
+        - conceptual_learning: the user asks what something is, what it does, or why it matters and needs an applicable learning process.
+        - implementation: the user wants to build, configure, implement, or apply something.
+        - troubleshooting: the user has an error, blocker, or unexpected behavior.
+        - comparison: the user wants to compare options, approaches, or tools.
+        - optimization: the user wants to improve performance, quality, cost, or accuracy.
+        - exploratory: the intent is broad or ambiguous and requires structured exploration.
 
-        Responde SOLO con JSON válido:
+        Return ONLY valid JSON:
         {{
-        "intent": "<una categoría>",
-        "roadmap_goal": "<objetivo accionable del roadmap en el idioma de la consulta>",
-        "retrieval_focus": "<qué conocimiento debe buscarse en la base para responder bien>",
-        "generation_guidance": "<cómo debe comportarse el generador del roadmap>",
-        "confidence": <número entre 0 y 1>
+        "intent": "<one category>",
+        "roadmap_goal": "<actionable roadmap goal in the query language>",
+        "retrieval_focus": "<knowledge the system should retrieve>",
+        "generation_guidance": "<how the roadmap generator should behave>",
+        "confidence": <number from 0 to 1>
         }}
 
-        Consulta del usuario:
+        User query:
         {raw_query}
         """
         default = {
             "intent": "exploratory",
             "roadmap_goal": raw_query,
             "retrieval_focus": raw_query,
-            "generation_guidance": "Construye un roadmap técnico, ordenado y accionable.",
+            "generation_guidance": "Build a technical, ordered, and actionable roadmap.",
             "confidence": 0.0,
         }
         try:
@@ -144,43 +144,43 @@ class RagEngine:
     def analyze_and_rewrite_query(self, raw_query: str) -> tuple[dict, str]:
         """Classify intent and produce the retrieval query in one LLM call."""
         prompt = f"""\
-        Eres un analista de consultas para un sistema RAG que genera roadmaps técnicos.
-        En una sola operación, clasifica la intención y crea una consulta refinada para
-        recuperar el conocimiento necesario y orientar un roadmap útil.
+        You are a query analyst for a RAG system that generates technical roadmaps.
+        In one operation, classify the intent and produce a refined query that retrieves
+        the necessary knowledge and guides a useful roadmap.
 
-        Categorías disponibles:
-        - conceptual_learning: aprender, practicar y aplicar un concepto.
-        - implementation: construir, configurar, implementar o aplicar algo.
-        - troubleshooting: diagnosticar un error o comportamiento inesperado.
-        - comparison: comparar alternativas mediante criterios y casos de uso.
-        - optimization: mejorar rendimiento, calidad, costo o precisión.
-        - exploratory: explorar de forma ordenada una intención amplia o ambigua.
+        Available categories:
+        - conceptual_learning: learn, practice, and apply a concept.
+        - implementation: build, configure, implement, or apply something.
+        - troubleshooting: diagnose an error or unexpected behavior.
+        - comparison: compare alternatives through decision criteria and use cases.
+        - optimization: improve performance, quality, cost, or accuracy.
+        - exploratory: explore a broad or ambiguous intent in an ordered way.
 
-        Reglas para refined_query:
-        - Hazla específica, técnica y adecuada para búsqueda semántica.
-        - Mantén el idioma original y el objetivo real del usuario.
-        - Conserva literalmente versiones, fechas, IDs de modelos, APIs y parámetros.
-        - No inventes expansiones ni significados para nombres propios o identificadores.
-        - Añade solo términos que ayuden a recuperar evidencia relevante.
+        Rules for refined_query:
+        - Make it specific, technical, and appropriate for semantic retrieval.
+        - Preserve the original language and the user's real objective.
+        - Preserve versions, dates, model IDs, APIs, and parameters literally.
+        - Do not invent expansions or meanings for proper names or identifiers.
+        - Add only terms that help retrieve relevant evidence.
 
-        Responde SOLO con JSON válido:
+        Return ONLY valid JSON:
         {{
-          "intent": "<una categoría>",
-          "roadmap_goal": "<objetivo accionable>",
-          "retrieval_focus": "<conocimiento que debe recuperarse>",
-          "generation_guidance": "<dirección que debe seguir el roadmap>",
-          "refined_query": "<consulta técnica refinada>",
-          "confidence": <número entre 0 y 1>
+          "intent": "<one category>",
+          "roadmap_goal": "<actionable goal>",
+          "retrieval_focus": "<knowledge to retrieve>",
+          "generation_guidance": "<roadmap direction>",
+          "refined_query": "<refined technical query>",
+          "confidence": <number from 0 to 1>
         }}
 
-        Consulta original:
+        Original query:
         {raw_query}
         """
         default = {
             "intent": "exploratory",
             "roadmap_goal": raw_query,
             "retrieval_focus": raw_query,
-            "generation_guidance": "Construye un roadmap técnico, ordenado y accionable.",
+            "generation_guidance": "Build a technical, ordered, and actionable roadmap.",
             "confidence": 0.0,
         }
         refined_query = raw_query
@@ -224,17 +224,17 @@ class RagEngine:
         if QUERY_INTENT_ENABLED:
             query_intent = query_intent or self.classify_query_intent(raw_query)
             intent_section = (
-                "INTENCIÓN CLASIFICADA:\n"
-                f"- Tipo: {query_intent.get('intent', 'exploratory')}\n"
-                f"- Objetivo del roadmap: {query_intent.get('roadmap_goal', raw_query)}\n"
-                f"- Foco de retrieval: {query_intent.get('retrieval_focus', raw_query)}\n"
-                f"- Guía de generación: {query_intent.get('generation_guidance', '')}\n\n"
+                "CLASSIFIED INTENT:\n"
+                f"- Type: {query_intent.get('intent', 'exploratory')}\n"
+                f"- Roadmap goal: {query_intent.get('roadmap_goal', raw_query)}\n"
+                f"- Retrieval focus: {query_intent.get('retrieval_focus', raw_query)}\n"
+                f"- Generation guidance: {query_intent.get('generation_guidance', '')}\n\n"
             )
             intent_rules = (
-                "- Si la intención es conceptual_learning, orienta la consulta hacia aprender, practicar y aplicar el concepto\n"
-                "- Si la intención es implementation, orienta la consulta hacia pasos de construcción o configuración\n"
-                "- Si la intención es troubleshooting, orienta la consulta hacia diagnóstico, causas y validaciones\n"
-                "- Si la intención es comparison, orienta la consulta hacia criterios de decisión, diferencias y casos de uso\n"
+                "- For conceptual_learning, orient the query toward learning, practicing, and applying the concept\n"
+                "- For implementation, orient the query toward build or configuration steps\n"
+                "- For troubleshooting, orient the query toward diagnosis, causes, and validation\n"
+                "- For comparison, orient the query toward decision criteria, differences, and use cases\n"
             )
         else:
             query_intent = query_intent or {"intent": "disabled", "confidence": 0.0}
@@ -242,23 +242,26 @@ class RagEngine:
             intent_rules = ""
 
         prompt = (
-            "Eres un experto en sistemas RAG técnicos. "
-            "Reescribe la siguiente consulta del usuario para hacerla más específica, técnica "
-            "y adecuada para búsqueda semántica en una base de conocimiento.\n\n"
+            "You are an expert in technical RAG systems. "
+            "Rewrite the following user query to make it more specific, technical, "
+            "and appropriate for semantic retrieval from a knowledge base.\n\n"
             f"{intent_section}"
-            "REGLAS:\n"
-            "- Añade terminología técnica relevante del dominio\n"
-            "- Especifica el objetivo final que el usuario quiere lograr\n"
-            "- Expande siglas o términos ambiguos\n"
+            "RULES:\n"
+            "- Add relevant technical terminology from the domain\n"
+            "- State the final objective the user wants to achieve\n"
+            "- Expand acronyms or ambiguous terms when appropriate\n"
             f"{intent_rules}"
-            "- Mantén el idioma original\n"
-            "- Responde SOLO con la consulta mejorada, sin explicaciones ni prefijos\n\n"
-            f"Consulta original: {raw_query}\n\n"
-            "Consulta mejorada:"
+            "- Preserve the original language\n"
+            "- Return ONLY the improved query, without explanations or prefixes\n\n"
+            f"Original query: {raw_query}\n\n"
+            "Improved query:"
         )
         rewritten = self.llm.invoke(prompt).content.strip()
         # Limpiar prefijos que el modelo pueda agregar
-        for prefix in ("Consulta mejorada:", "Aquí", "La consulta"):
+        for prefix in (
+            "Improved query:", "Here", "The query",
+            "Consulta mejorada:", "Aquí", "La consulta",
+        ):
             if rewritten.startswith(prefix):
                 rewritten = rewritten[len(prefix):].strip()
         print(f"  [Query Rewriting]\n    Original : {raw_query}\n    Mejorada : {rewritten}")
@@ -597,7 +600,7 @@ class RagEngine:
             query_intent = query_intent or {
                 "intent": "exploratory",
                 "roadmap_goal": original_query,
-                "generation_guidance": "Construye un roadmap técnico, ordenado y accionable.",
+                "generation_guidance": "Build a technical, ordered, and actionable roadmap.",
             }
             if QUERY_INTENT_ENABLED and query_intent.get("intent") not in ("disabled", "error"):
                 intent_context = (
@@ -610,8 +613,8 @@ class RagEngine:
                 intent_context = ""
                 intent_section = "No additional intent guidance."
             context = "\n\n---\n\n".join(contexts) if contexts else (
-                "No hay contexto específico recuperado. "
-                "Genera pasos basados en conocimiento técnico general del dominio."
+                "No specific context was retrieved. "
+                "Generate steps based on general technical knowledge of the domain."
             )
 
             template = """\
