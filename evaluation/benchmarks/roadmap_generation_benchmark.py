@@ -12,14 +12,24 @@ from pathlib import Path
 from typing import Any
 
 from evaluation.config import config
+from evaluation.benchmarks.generation_reporting import (
+    aggregate_generation_results as _aggregate,
+    recovery_status as _recovery_status,
+    schema_display as _schema_display,
+    schema_not_evaluated as _schema_not_evaluated,
+)
 from evaluation.dataset import EVAL_SAMPLES
 from evaluation.metrics.structure_validator import StructureValidator
 from evaluation.rag_adapter import RagAdapter
 from evaluation.tracking import log_generation_benchmark
 from src.llm_provider import active_model_name
+from src.rag_engine import (
+    GENERATION_MAX_OUTPUT_TOKENS,
+    QUERY_PREPROCESSING_REASONING_MODE,
+)
 
 
-DEFAULT_SAMPLE_INDICES = (15, 16, 17, 18, 19)
+DEFAULT_SAMPLE_INDICES = tuple(range(15, 45))
 TARGET_SECONDS = 120.0
 
 
@@ -47,63 +57,6 @@ def _run_directory(base: str | Path, run_name: str) -> Path:
     return path
 
 
-def _aggregate(results: list[dict[str, Any]], initialization_s: float) -> dict[str, Any]:
-    stage_names = sorted({
-        name
-        for result in results
-        for name in result.get("generation_trace", {}).get("timings", {})
-    })
-    stages = {}
-    for name in stage_names:
-        values = [
-            float(result["generation_trace"]["timings"][name])
-            for result in results
-            if name in result.get("generation_trace", {}).get("timings", {})
-        ]
-        stages[name] = {
-            "mean_s": round(sum(values) / len(values), 4),
-            "min_s": round(min(values), 4),
-            "max_s": round(max(values), 4),
-            "total_s": round(sum(values), 4),
-        }
-    totals = [float(result.get("observed_total_s", 0)) for result in results]
-    successes = [result for result in results if result.get("generation_succeeded")]
-    schema_valid = [
-        result
-        for result in results
-        if result.get("schema_validity", {}).get("verdict") == "PASS"
-    ]
-    web_required = [result for result in results if result.get("web_required")]
-    web_valid = [result for result in web_required if result.get("web_requirement_passed")]
-    within_target = [
-        result for result in results if result["observed_total_s"] <= TARGET_SECONDS
-    ]
-    return {
-        "initialization_s": round(initialization_s, 4),
-        "sample_count": len(results),
-        "generation_success_count": len(successes),
-        "generation_failure_count": len(results) - len(successes),
-        "generation_success_rate": round(len(successes) / len(results), 4),
-        "schema_validity_pass_count": len(schema_valid),
-        "schema_validity_pass_rate": round(len(schema_valid) / len(results), 4),
-        "web_required_count": len(web_required),
-        "web_requirement_pass_count": len(web_valid),
-        "web_requirement_pass_rate": (
-            round(len(web_valid) / len(web_required), 4) if web_required else 1.0
-        ),
-        "target_seconds": TARGET_SECONDS,
-        "within_target_count": len(within_target),
-        "within_target_rate": round(len(within_target) / len(results), 4),
-        "total_generation": {
-            "mean_s": round(sum(totals) / len(totals), 4),
-            "min_s": round(min(totals), 4),
-            "max_s": round(max(totals), 4),
-            "total_s": round(sum(totals), 4),
-        },
-        "stage_timings": stages,
-    }
-
-
 def _mlflow_metrics(summary: dict[str, Any]) -> dict[str, float]:
     total = summary["total_generation"]
     metrics = {
@@ -111,13 +64,31 @@ def _mlflow_metrics(summary: dict[str, Any]) -> dict[str, float]:
         "generation.sample_count": summary["sample_count"],
         "generation.failure_count": summary["generation_failure_count"],
         "generation.success_rate": summary["generation_success_rate"],
-        "generation.schema_validity_pass_rate": summary["schema_validity_pass_rate"],
         "generation.web_requirement_pass_rate": summary["web_requirement_pass_rate"],
         "generation.within_120s_rate": summary["within_target_rate"],
         "generation.total.mean_s": total["mean_s"],
         "generation.total.min_s": total["min_s"],
         "generation.total.max_s": total["max_s"],
+        "generation.initial_contract_failure_count": summary[
+            "generation_initial_contract_failure_count"
+        ],
+        "generation.first_attempt_valid_rate": summary[
+            "generation_first_attempt_valid_rate"
+        ],
+        "generation.retry_activation_rate": summary[
+            "generation_retry_activation_rate"
+        ],
+        "generation.recovered_count": summary["generation_recovered_count"],
     }
+    if summary["schema_validity_pass_rate"] is not None:
+        metrics["generation.schema_validity_pass_rate"] = summary[
+            "schema_validity_pass_rate"
+        ]
+    if summary["generation_recovery_rate"] is not None:
+        metrics["generation.recovery_rate"] = summary["generation_recovery_rate"]
+        metrics["generation.recovery_failure_rate"] = summary[
+            "generation_recovery_failure_rate"
+        ]
     for name, values in summary["stage_timings"].items():
         stage = name.removesuffix("_s")
         metrics[f"generation.{stage}.mean_s"] = values["mean_s"]
@@ -145,8 +116,9 @@ def _save_html(payload: dict[str, Any], path: Path) -> None:
             f"<td>{timings.get('source_attribution_s', 0):.2f}s</td>"
             f"<td>{trace.get('roadmap_step_count', 0)}</td>"
             f"<td>{'PASS' if result['generation_succeeded'] else 'FAIL'}</td>"
-            f"<td>{result['schema_validity']['score']:.2f}/10 "
-            f"{html.escape(result['schema_validity']['verdict'])}</td>"
+            f"<td>{trace.get('generation_attempt_count', 0)}</td>"
+            f"<td>{html.escape(_recovery_status(trace))}</td>"
+            f"<td>{html.escape(_schema_display(result['schema_validity']))}</td>"
             f"<td>{'YES' if result['web_required'] else 'NO'}</td>"
             f"<td>{trace.get('web_context_count', 0)}</td>"
             f"<td>{html.escape(result.get('retrieval', {}).get('mode', ''))}</td>"
@@ -155,13 +127,19 @@ def _save_html(payload: dict[str, Any], path: Path) -> None:
             "</tr>"
         )
     summary = payload["summary"]
+    recovery_summary = (
+        f"{summary['generation_recovered_count']}/"
+        f"{summary['generation_initial_contract_failure_count']} initial failures"
+        if summary["generation_initial_contract_failure_count"]
+        else "N/A — no initial failures"
+    )
     document = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Roadmap Generation Benchmark</title>
 <style>body{{font-family:Arial,sans-serif;margin:28px;color:#172033}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #d8deea;padding:8px;text-align:left}}th{{background:#eef2f8}}.cards{{display:flex;gap:16px;margin:20px 0}}.card{{padding:16px;border:1px solid #d8deea;border-radius:8px}}</style>
 </head><body><h1>Roadmap Generation Benchmark</h1>
 <p>Generated: {html.escape(payload['generated_at'])} | Provider: {html.escape(payload['configuration']['provider'])} | Model: {html.escape(payload['configuration']['model'])}</p>
-<div class="cards"><div class="card"><b>Mean</b><br>&le; target: {summary['target_seconds']:.0f}s<br>observed: {summary['total_generation']['mean_s']:.2f}s</div><div class="card"><b>Within target</b><br>{summary['within_target_count']}/{summary['sample_count']}</div><div class="card"><b>Initialization</b><br>{summary['initialization_s']:.2f}s</div></div>
-<table><thead><tr><th>#</th><th>Category</th><th>Question</th><th>Total</th><th>Merged preprocessing</th><th>Intent</th><th>Refinement</th><th>Retrieval</th><th>Web time</th><th>Roadmap</th><th>Attribution</th><th>Steps</th><th>Generation</th><th>Schema validity</th><th>Web required</th><th>Web contexts</th><th>Retrieval mode</th><th>Web check</th><th>Target</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
+<div class="cards"><div class="card"><b>Mean</b><br>&le; target: {summary['target_seconds']:.0f}s<br>observed: {summary['total_generation']['mean_s']:.2f}s</div><div class="card"><b>Within target</b><br>{summary['within_target_count']}/{summary['sample_count']}</div><div class="card"><b>First-pass valid</b><br>{summary['generation_first_attempt_valid_count']}/{summary['sample_count']}</div><div class="card"><b>Recovery</b><br>{recovery_summary}</div><div class="card"><b>Initialization</b><br>{summary['initialization_s']:.2f}s</div></div>
+<table><thead><tr><th>#</th><th>Category</th><th>Question</th><th>Total</th><th>Merged preprocessing</th><th>Intent</th><th>Refinement</th><th>Retrieval</th><th>Web time</th><th>Roadmap</th><th>Attribution</th><th>Steps</th><th>Generation</th><th>Attempts</th><th>Recovery</th><th>Schema validity</th><th>Web required</th><th>Web contexts</th><th>Retrieval mode</th><th>Web check</th><th>Target</th></tr></thead><tbody>{''.join(rows)}</tbody></table>
 </body></html>"""
     path.write_text(document, encoding="utf-8")
 
@@ -190,7 +168,11 @@ def run(
         observed_total_s = round(time.perf_counter() - started, 4)
         roadmap = generated.get("roadmap", {})
         succeeded = roadmap.get("title") != "Error" and bool(roadmap.get("steps"))
-        schema_validity = schema_validator.validate(roadmap)
+        schema_validity = (
+            schema_validator.validate(roadmap)
+            if succeeded
+            else _schema_not_evaluated("Roadmap generation failed before schema validation.")
+        )
         step_count = len(roadmap.get("steps", []))
         web_required = bool(sample.requires_web)
         web_context_count = int(
@@ -208,6 +190,7 @@ def run(
             "web_requirement_passed": web_requirement_passed,
             "schema_validity": schema_validity,
             "refined_question": generated.get("refined_question", ""),
+            "web_search_query": generated.get("web_search_query", ""),
             "retrieval": generated.get("retrieval", {}),
             "generation_trace": generated.get("generation_trace", {}),
             "roadmap_artifact": f"roadmaps/sample_{sample_index}.json",
@@ -222,8 +205,7 @@ def run(
             f"Completed in {observed_total_s:.2f}s | "
             f"steps={step_count} | generation="
             f"{'PASS' if succeeded else 'FAIL'} | "
-            f"schema={schema_validity['score']:.2f}/10 "
-            f"{schema_validity['verdict']} | "
+            f"schema={_schema_display(schema_validity)} | "
             f"web={'PASS' if web_requirement_passed else 'FAIL'} | "
             f"target={'PASS' if result['within_target'] else 'ABOVE'}"
         )
@@ -238,6 +220,9 @@ def run(
             "generation_reasoning_mode": os.getenv(
                 "LLM_GENERATION_REASONING_MODE", "provider_default"
             ).lower().strip(),
+            "query_preprocessing_reasoning_mode": (
+                QUERY_PREPROCESSING_REASONING_MODE
+            ),
             "query_preprocessing_mode": os.getenv(
                 "QUERY_PREPROCESSING_MODE", "sequential"
             ).lower().strip(),
@@ -249,6 +234,42 @@ def run(
                     for result in results
                     if result.get("generation_trace", {}).get(
                         "generation_prompt_version"
+                    )
+                ),
+                "unknown",
+            ),
+            "generation_timeout_seconds": next(
+                (
+                    result.get("generation_trace", {}).get(
+                        "generation_timeout_seconds"
+                    )
+                    for result in results
+                    if result.get("generation_trace", {}).get(
+                        "generation_timeout_seconds"
+                    ) is not None
+                ),
+                None,
+            ),
+            "generation_max_output_tokens": next(
+                (
+                    result.get("generation_trace", {}).get(
+                        "generation_max_output_tokens"
+                    )
+                    for result in results
+                    if result.get("generation_trace", {}).get(
+                        "generation_max_output_tokens"
+                    ) is not None
+                ),
+                None,
+            ),
+            "generation_retry_policy": next(
+                (
+                    result.get("generation_trace", {}).get(
+                        "generation_retry_policy"
+                    )
+                    for result in results
+                    if result.get("generation_trace", {}).get(
+                        "generation_retry_policy"
                     )
                 ),
                 "unknown",
@@ -277,9 +298,22 @@ def run(
     print(f"  Range:         {summary['total_generation']['min_s']:.2f}s - {summary['total_generation']['max_s']:.2f}s")
     print(f"  Within target: {summary['within_target_count']}/{summary['sample_count']}")
     print(
-        "  Valid schema:   "
-        f"{summary['schema_validity_pass_count']}/{summary['sample_count']}"
+        "  First-pass:    "
+        f"{summary['generation_first_attempt_valid_count']}/"
+        f"{summary['sample_count']} valid"
     )
+    print(
+        "  Valid schema:   "
+        f"{summary['schema_validity_pass_count']}/"
+        f"{summary['schema_validity_evaluated_count']} evaluated"
+    )
+    recovery_summary = (
+        f"{summary['generation_recovered_count']}/"
+        f"{summary['generation_initial_contract_failure_count']} initial failures"
+        if summary["generation_initial_contract_failure_count"]
+        else "N/A (no initial failures)"
+    )
+    print(f"  Recovered:      {recovery_summary}")
     print(
         "  Required web:  "
         f"{summary['web_requirement_pass_count']}/{summary['web_required_count']}"
@@ -296,7 +330,7 @@ def main() -> None:
     parser.add_argument(
         "--sample-indices",
         default=",".join(map(str, DEFAULT_SAMPLE_INDICES)),
-        help="One-based dataset indices (default: 15,16,17,18,19).",
+        help="One-based dataset indices (default: 15-44, 30 generation cases).",
     )
     parser.add_argument("--run-name", default="roadmap-generation-baseline-v1")
     parser.add_argument("--output-dir", default=config.reports_dir)
@@ -312,9 +346,14 @@ def main() -> None:
         print(f"  Provider: {os.getenv('LLM_PROVIDER', 'bedrock')}")
         print(f"  Model: {active_model_name()}")
         print(f"  Target: <= {TARGET_SECONDS:.0f}s per roadmap")
+        print(f"  Max output tokens: {GENERATION_MAX_OUTPUT_TOKENS}")
         print(
             "  Generation reasoning: "
             f"{os.getenv('LLM_GENERATION_REASONING_MODE', 'provider_default')}"
+        )
+        print(
+            "  Query preprocessing reasoning: "
+            f"{QUERY_PREPROCESSING_REASONING_MODE}"
         )
         print(
             "  Query preprocessing: "

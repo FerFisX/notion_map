@@ -56,7 +56,7 @@ def validate_prompt_language() -> None:
         ]
     )
     engine = object.__new__(RagEngine)
-    engine.llm = fake_llm
+    engine.preprocessing_llm = fake_llm
 
     engine.classify_query_intent("¿Cómo configuro medidas DAX?")
     engine.analyze_and_rewrite_query("¿Cómo configuro medidas DAX?")
