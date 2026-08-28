@@ -57,7 +57,7 @@ CASES = [
             _step(3, "Create prior-year sales", "Create [Sales PY] with CALCULATE([Total Sales], SAMEPERIODLASTYEAR(Date[Date]))."),
         ]},
         [
-            _context(1, "Time-intelligence models require a continuous calendar table marked as the date table and related to the fact-table date column."),
+            _context(1, "Time-intelligence models require a continuous calendar table marked as the date table and related to the fact-table date column, such as Sales[OrderDate] in this model."),
             _context(2, "Define Total Sales as SUM(Sales[SalesAmount])."),
             _context(3, "Prior-year sales can be calculated with CALCULATE([Total Sales], SAMEPERIODLASTYEAR(Date[Date]))."),
         ],

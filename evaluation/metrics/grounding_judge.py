@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from evaluation.metrics.prompt_payloads import compact_contexts, compact_roadmap, prompt_json
 from evaluation.structured_output import invoke_json_with_retry
-from src.llm_provider import get_judge_llm, invoke_llm_text
+from src.llm_provider import get_judge_llm
 
 
 _SCORE_CORRECTION_PROMPT = """\
@@ -47,9 +48,10 @@ _CLAIM_STATUSES = {
 }
 _CLAIM_IMPORTANCE = {"core", "supporting"}
 _STEP_EVALUABILITY = {"evaluable", "not_applicable"}
+_STEP_BATCH_SIZE = 3
 
 
-_PROMPT_TEMPLATE = """\
+_BATCH_PROMPT_TEMPLATE = """\
 You are an expert evaluator of retrieval-grounded technical roadmaps.
 Return ONLY valid JSON. Do not use markdown or extra text.
 
@@ -59,148 +61,100 @@ USER QUESTION
 RETRIEVED CONTEXTS
 {contexts}
 
-ROADMAP
+ROADMAP STEPS IN THIS BATCH
 {roadmap}
 
-OBJECTIVE
-Evaluate only Grounding: whether verifiable claims in each existing roadmap
-step are supported by the retrieved contexts provided above.
+Evaluate only Grounding: whether atomic, materially verifiable claims in each
+step are supported by the retrieved contexts. Use only those contexts as
+evidence; do not use external knowledge or general plausibility.
 
-EVIDENCE RULE
-Use ONLY the retrieved contexts as evidence. Do not use external knowledge,
-general plausibility, or assumptions about the technology. A technically
-correct claim is still unsupported when the supplied context does not support
-it.
+Evaluate every supplied step exactly once and preserve its exact ID. Read its
+label, description, and key points together. Split independent claims when
+different evidence could support them. Return at most three claims per step,
+prioritizing the main technical instruction and only material supporting
+details. Do not invent claims or fragment minor wording into separate claims.
 
-CLAIM IDENTIFICATION
-- Evaluate every roadmap step exactly once.
-- Read each step label, description, and key points together.
-- Extract atomic, materially verifiable technical or procedural claims.
-- Split independent claims when different evidence could support them.
-- Do not invent claims that the step does not make.
-- Mark a step not_applicable only when it contains no factual, technical, or
-  procedural assertion that can reasonably be checked against context.
-- Planning preferences, organizational decisions, and purely subjective goals
-  may be not_applicable.
-- An instruction can contain a verifiable claim: for example, recommending a
-  named function, configuration, dependency, or procedure asserts that it is
-  appropriate for the stated task.
-- An unfamiliar or apparently invented product, node, property, function, or
-  procedure is still an evaluable claim. When the contexts provide no basis for
-  it, classify the claim as unsupported; never use not_applicable merely
-  because evidence is absent or the named capability is unknown.
+Evaluability:
+- evaluable: the step makes a factual, technical, or procedural assertion.
+- not_applicable: the step contains only a subjective goal, preference, or
+  organizational decision. An unfamiliar product or procedure is still
+  evaluable and unsupported when no context supports it.
 
-CLAIM IMPORTANCE
-- core: the claim materially defines the step's main technical instruction or
-  justification.
-- supporting: the claim adds a secondary detail without defining the step's
-  main responsibility.
+Importance:
+- core: defines the step's main technical instruction or justification.
+- supporting: adds a secondary detail.
 
-CLAIM STATUS
-- supported: context directly or reasonably entails the full claim.
-- unsupported: no relevant contextual evidence supports the claim.
-- insufficient_evidence: context is related but does not establish the complete
-  claim or required specificity.
-- contradicted: context explicitly conflicts with the claim.
+Status:
+- supported: context directly or reasonably entails the complete claim.
+- unsupported: no relevant context supports it.
+- insufficient_evidence: related context supports only part of it.
+- contradicted: context explicitly conflicts with it.
 
-Distinguish unsupported from insufficient_evidence by the evidence relationship,
-not by claim importance:
-- A named feature, behavior, property, function, or procedure that has no basis
-  anywhere in the contexts is unsupported, even when it is only a supporting
-  detail. One such invented detail places the roadmap in needs review.
-- Use insufficient_evidence only when a relevant context partially supports the
-  claim but leaves part of it genuinely unresolved. A single minor supporting
-  gap of this kind may remain in the grounded band.
+Supported and contradicted claims must cite valid context IDs and a concise
+evidence excerpt. Unsupported claims must use empty context_ids and evidence.
+Do not penalize missing coverage, order, actionability, overlap, structure, or
+schema validity.
 
-Do not mark a claim supported merely because the context mentions the same
-topic or vocabulary. Cite exact context IDs and a concise evidence excerpt.
-Unsupported claims must have an empty context_ids list and empty evidence.
-Contradicted claims must cite the context that contradicts them.
-
-SCORE BANDS
-- 8.0-10.0 / grounded:
-  All core claims are supported. At most one supporting claim has insufficient
-  evidence, and there are no unsupported or contradicted claims.
-- 5.0-7.9 / needs review:
-  Support is mixed, one supporting claim is unsupported, or a localized core
-  claim lacks sufficient evidence, while most of the roadmap's technical basis
-  remains supported.
-- 0.0-4.9 / ungrounded:
-  A central claim is contradicted, several core claims are unsupported, the
-  context is irrelevant, most evaluable steps lack support, or none of the
-  roadmap's evaluable claims are supported. Two or more unsupported core claims
-  normally belong in this band when they represent most of the roadmap.
-
-The score is NOT a raw arithmetic percentage. Select its band from the
-importance and practical impact of unsupported claims, then choose a natural
-value inside that band.
-
-Calibration check: if your claim list contains any unsupported claim, do not
-assign 8.0 or higher. If it contains only one minor supporting
-insufficient_evidence claim and every core claim is supported, 8.0-10.0 remains
-available. Never describe an unsupported claim as insufficient evidence in the
-overall reason.
-
-MECE BOUNDARIES
-Do NOT lower Grounding because:
-- requested content is missing; that belongs to Completeness;
-- steps are in the wrong order; that belongs to Logical Order;
-- steps are vague or hard to execute; that belongs to Actionability;
-- steps duplicate work; that belongs to Step Distinctness and Step Overlap;
-- framing, closure, granularity, navigation, or length is weak; that belongs
-  to Structure Quality;
-- the roadmap schema is invalid; that belongs to Schema Validity.
-
-Do not reward extra coverage. An incomplete roadmap can be fully grounded when
-every claim it does contain is supported.
-
-CONSISTENCY REQUIREMENTS
-- Return exactly one step_claims entry for every roadmap step.
-- Preserve exact roadmap step IDs.
-- Use only context IDs provided in RETRIEVED CONTEXTS.
-- Every evaluable step must contain at least one claim.
-- Every not_applicable step must contain no claims.
-- Supported and contradicted claims must cite context IDs and evidence.
-- Unsupported claims must not cite evidence.
-- If a core claim is contradicted, the score MUST be in 0.0-4.9.
-- A score of 8.0 or higher requires all core claims supported and no
-  unsupported or contradicted claims. At most one supporting
-  insufficient_evidence claim may remain.
-- The score, reason, claim statuses, strengths, and recommendations must
-  describe the same assessment.
-
-Before returning JSON:
-1. List all contradicted, unsupported, and insufficient claims.
-2. Inspect whether each is core or supporting.
-3. Select the score band from their material impact.
-4. Verify that every roadmap step and evidence context ID is valid.
-
-Expected JSON schema:
+Return exactly:
 {{
   "grounding": {{
     "step_claims": [
       {{
-        "step_id": "<exact roadmap step ID>",
+        "step_id": "<exact supplied step ID>",
         "evaluability": "evaluable|not_applicable",
-        "reason": "<why this step is evaluable or not>",
+        "reason": "<brief case-specific reason>",
         "claims": [
           {{
-            "claim_id": "<unique concise ID>",
+            "claim_id": "<step_id>_claim_<number>",
             "claim": "<atomic verifiable claim>",
             "importance": "core|supporting",
             "status": "supported|unsupported|insufficient_evidence|contradicted",
-            "context_ids": ["context_1", "..."],
+            "context_ids": ["context_1"],
             "evidence": "<concise excerpt or empty string>",
-            "explanation": "<case-specific support assessment>",
+            "explanation": "<support assessment>",
             "recommendation": "<correction or evidence needed, or empty string>"
           }}
         ]
       }}
-    ],
+    ]
+  }}
+}}
+"""
+
+
+_SUMMARY_PROMPT_TEMPLATE = """\
+You assign the final Grounding score to claim diagnostics that have already
+been validated. Return ONLY valid JSON with no markdown or extra text.
+
+USER QUESTION
+{question}
+
+VALIDATED CLAIM DIAGNOSTICS
+{diagnostics}
+
+Do not add, remove, or reclassify claims. Score only whether existing claims
+are supported by retrieved context. Do not score completeness, external
+correctness, actionability, order, overlap, structure, or schema validity.
+
+Score bands:
+- 8.0-10.0: all core claims supported; no unsupported or contradicted claims;
+  at most one minor supporting insufficient-evidence claim.
+- 5.0-7.9: support is mixed, one supporting claim is unsupported, or a
+  localized core claim lacks sufficient evidence while most technical basis
+  remains supported.
+- 0.0-4.9: a core claim is contradicted, several core claims are unsupported,
+  context is irrelevant, or most evaluable steps lack support.
+
+The score is not a raw percentage. Select the band from material impact, then
+choose a natural decimal within it.
+
+Return exactly:
+{{
+  "grounding_summary": {{
     "score": <0-10>,
     "reason": "<short explanation supporting the score band>",
-    "strengths": ["<grounding strength>", "..."],
-    "recommendations": ["<grounding recommendation>", "..."]
+    "strengths": ["<grounding strength>"],
+    "recommendations": ["<grounding recommendation>"]
   }}
 }}
 """
@@ -278,6 +232,55 @@ def _parse_score_correction(
     return parsed
 
 
+def _parse_grounding_batch(
+    raw: str,
+    expected_step_ids: list[str],
+) -> dict[str, Any]:
+    parsed = _parse_json_response(raw)
+    grounding = parsed.get("grounding")
+    if not isinstance(grounding, dict):
+        raise ValueError("grounding must be an object")
+    step_claims = grounding.get("step_claims")
+    if not isinstance(step_claims, list):
+        raise ValueError("grounding.step_claims must be a list")
+    observed_ids = []
+    for item in step_claims:
+        if not isinstance(item, dict):
+            raise ValueError("Every step_claims entry must be an object")
+        step_id = str(item.get("step_id", "")).strip()
+        observed_ids.append(step_id)
+        if not isinstance(item.get("claims", []), list):
+            raise ValueError(f"Claims for {step_id or '(missing ID)'} must be a list")
+        if len(item.get("claims", [])) > 3:
+            raise ValueError(f"Grounding batch returned more than 3 claims for {step_id}")
+    if observed_ids != expected_step_ids:
+        raise ValueError(
+            "Grounding batch must assess each supplied step exactly once in order; "
+            f"expected {expected_step_ids}, received {observed_ids}"
+        )
+    return parsed
+
+
+def _parse_grounding_summary(raw: str) -> dict[str, Any]:
+    parsed = _parse_json_response(raw)
+    summary = parsed.get("grounding_summary")
+    if not isinstance(summary, dict):
+        raise ValueError("grounding_summary must be an object")
+    try:
+        score = float(summary.get("score"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Grounding summary score must be numeric") from exc
+    if not 0.0 <= score <= 10.0:
+        raise ValueError("Grounding summary score must be between 0 and 10")
+    if not str(summary.get("reason", "")).strip():
+        raise ValueError("Grounding summary requires a reason")
+    if not isinstance(summary.get("strengths", []), list):
+        raise ValueError("Grounding summary strengths must be a list")
+    if not isinstance(summary.get("recommendations", []), list):
+        raise ValueError("Grounding summary recommendations must be a list")
+    return parsed
+
+
 def _roadmap_steps(roadmap: dict[str, Any]) -> list[dict[str, Any]]:
     raw = roadmap.get("steps", [])
     if not isinstance(raw, list):
@@ -286,17 +289,7 @@ def _roadmap_steps(roadmap: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _contexts(values: list[Any] | None) -> list[dict[str, str]]:
-    normalized = []
-    for index, value in enumerate(values or [], 1):
-        if isinstance(value, dict):
-            context_id = str(value.get("id", "")).strip() or f"context_{index}"
-            text = str(value.get("text", value.get("content", ""))).strip()
-        else:
-            context_id = f"context_{index}"
-            text = str(value).strip()
-        if text:
-            normalized.append({"id": context_id, "text": text})
-    return normalized
+    return compact_contexts(values)
 
 
 def _fallback_result(roadmap: dict[str, Any], error: Exception | None = None) -> dict[str, Any]:
@@ -545,14 +538,6 @@ class GroundingJudge:
     def __init__(self, llm=None):
         self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=4096)
 
-    def _invoke(self, prompt: str, attempt: int = 1) -> str:
-        return invoke_llm_text(
-            self.llm,
-            prompt,
-            operation="Grounding",
-            attempt=attempt,
-        )
-
     def evaluate(
         self,
         roadmap: dict[str, Any],
@@ -560,25 +545,112 @@ class GroundingJudge:
         question: str = "",
     ) -> dict[str, Any]:
         normalized_contexts = _contexts(contexts)
-        prompt = _PROMPT_TEMPLATE.format(
-            question=question or "(not provided)",
-            contexts=json.dumps(normalized_contexts, ensure_ascii=False, indent=2),
-            roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2),
-        )
+        steps = _roadmap_steps(roadmap)
+        batch_traces: list[dict[str, Any]] = []
+        step_claims: list[dict[str, Any]] = []
+        active_stage = "setup"
         try:
-            raw = self._invoke(prompt, attempt=1)
-            retried = False
-            retry_reason = ""
-            try:
-                parsed = _parse_json_response(raw)
-            except (json.JSONDecodeError, ValueError):
-                retry_reason = "the previous response was not valid JSON"
-                retry_prompt = (
-                    f"{prompt}\n\nRETRY REQUIREMENT\n"
-                    "The previous response was not valid JSON. Return the complete JSON object only."
+            if not steps:
+                raise ValueError("Grounding requires at least one roadmap step")
+
+            batches = [
+                steps[index:index + _STEP_BATCH_SIZE]
+                for index in range(0, len(steps), _STEP_BATCH_SIZE)
+            ]
+            for batch_index, batch_steps in enumerate(batches, 1):
+                active_stage = f"claim_batch_{batch_index}_of_{len(batches)}"
+                expected_ids = [
+                    str(step.get("id", "")).strip() for step in batch_steps
+                ]
+                batch_roadmap = compact_roadmap({
+                    "title": roadmap.get("title", ""),
+                    "steps": batch_steps,
+                })
+                batch_prompt = _BATCH_PROMPT_TEMPLATE.format(
+                    question=question or "(not provided)",
+                    contexts=prompt_json(normalized_contexts),
+                    roadmap=prompt_json(batch_roadmap),
                 )
-                parsed = _parse_json_response(self._invoke(retry_prompt, attempt=2))
-                retried = True
+                batch_result, batch_trace = invoke_json_with_retry(
+                    self.llm,
+                    batch_prompt,
+                    operation=f"Grounding claim batch {batch_index}/{len(batches)}",
+                    parser=lambda raw, ids=expected_ids: _parse_grounding_batch(
+                        raw, ids
+                    ),
+                    repair_instruction=(
+                        "Return exactly one step_claims entry for each supplied "
+                        f"step ID, in order: {expected_ids}. Return no overall score."
+                    ),
+                )
+                for item in batch_result["grounding"]["step_claims"]:
+                    step_id = str(item.get("step_id", "")).strip()
+                    for claim_index, claim in enumerate(item.get("claims", []), 1):
+                        claim["claim_id"] = f"{step_id}_claim_{claim_index}"
+                    step_claims.append(item)
+                batch_traces.append({
+                    "batch": batch_index,
+                    "step_ids": expected_ids,
+                    **batch_trace,
+                })
+
+            diagnostic_result = _normalize_result(
+                {
+                    "grounding": {
+                        "step_claims": step_claims,
+                        "score": 0,
+                        "reason": "Pending final Grounding score.",
+                        "strengths": [],
+                        "recommendations": [],
+                    }
+                },
+                roadmap,
+                normalized_contexts,
+            )["grounding"]
+            diagnostics = {
+                "evaluable_claim_count": diagnostic_result["evaluable_claim_count"],
+                "supported_claim_count": diagnostic_result["supported_claim_count"],
+                "unsupported_claim_count": diagnostic_result[
+                    "unsupported_claim_count"
+                ],
+                "contradiction_count": diagnostic_result["contradiction_count"],
+                "claim_support_pct": diagnostic_result["claim_support_pct"],
+                "step_grounded_pct": diagnostic_result["step_grounded_pct"],
+                "claims": [
+                    {
+                        "claim_id": claim["claim_id"],
+                        "step_id": claim["step_id"],
+                        "claim": claim["claim"],
+                        "importance": claim["importance"],
+                        "status": claim["status"],
+                    }
+                    for claim in diagnostic_result["claims"]
+                ],
+            }
+            active_stage = "summary"
+            summary_result, summary_trace = invoke_json_with_retry(
+                self.llm,
+                _SUMMARY_PROMPT_TEMPLATE.format(
+                    question=question or "(not provided)",
+                    diagnostics=prompt_json(diagnostics),
+                ),
+                operation="Grounding summary",
+                parser=_parse_grounding_summary,
+                repair_instruction=(
+                    "Return the complete grounding_summary object with a numeric "
+                    "score, reason, strengths, and recommendations."
+                ),
+            )
+            summary = summary_result["grounding_summary"]
+            parsed = {
+                "grounding": {
+                    "step_claims": step_claims,
+                    "score": summary["score"],
+                    "reason": summary["reason"],
+                    "strengths": summary.get("strengths", []),
+                    "recommendations": summary.get("recommendations", []),
+                }
+            }
             normalized = _normalize_result(parsed, roadmap, normalized_contexts)
             consistency_prefixes = (
                 "The score is below 8.0 despite full claim support.",
@@ -591,8 +663,10 @@ class GroundingJudge:
                 for note in normalized["grounding"].get("normalization_notes", [])
                 if str(note).startswith(consistency_prefixes)
             ]
-            if consistency_notes and not retried:
-                retry_reason = "; ".join(consistency_notes)
+            correction_trace = None
+            if consistency_notes:
+                active_stage = "score_correction"
+                correction_reason = "; ".join(consistency_notes)
                 print(
                     "      [LLM] Grounding score contradicts claim diagnostics; "
                     "starting one directed score correction.",
@@ -633,9 +707,7 @@ class GroundingJudge:
                     ],
                 }
                 correction_prompt = _SCORE_CORRECTION_PROMPT.format(
-                    diagnostics=json.dumps(
-                        diagnostics, ensure_ascii=False, indent=2
-                    )[:7000],
+                    diagnostics=prompt_json(diagnostics),
                     score_band=mandatory_band,
                 )
                 correction_result, correction_trace = invoke_json_with_retry(
@@ -658,27 +730,43 @@ class GroundingJudge:
                     "recommendations", []
                 )
                 normalized = _normalize_result(parsed, roadmap, normalized_contexts)
-                retried = True
-            if consistency_notes and retried:
                 normalized["grounding"]["normalization_notes"].append(
                     "Applied a directed score correction after: "
-                    f"{str(retry_reason).rstrip('.')}."
+                    f"{correction_reason.rstrip('.')}."
                 )
-            elif retried:
-                normalized["grounding"]["normalization_notes"].append(
-                    f"Retried once after an invalid response: {str(retry_reason).rstrip('.')}."
-                )
+            all_traces = batch_traces + [summary_trace]
+            attempt_count = sum(int(trace.get("attempt_count", 1)) for trace in all_traces)
+            recovered = any(bool(trace.get("recovered")) for trace in all_traces)
             normalized["grounding"]["judge_execution"] = {
-                "attempt_count": 2 if retried else 1,
-                "recovered": retried and not normalized["grounding"].get(
+                "strategy": "step_batches_then_summary",
+                "batch_size": _STEP_BATCH_SIZE,
+                "step_batches": batch_traces,
+                "summary": summary_trace,
+                "attempt_count": attempt_count,
+                "recovered": recovered and not normalized["grounding"].get(
                     "manual_review_required", False
                 ),
-                "retry_reason": retry_reason or None,
             }
-            if consistency_notes and retried and "correction_trace" in locals():
+            if correction_trace is not None:
+                normalized["grounding"]["judge_execution"]["attempt_count"] += int(
+                    correction_trace.get("attempt_count", 1)
+                )
+                normalized["grounding"]["judge_execution"]["recovered"] = (
+                    bool(normalized["grounding"]["judge_execution"]["recovered"])
+                    or bool(correction_trace.get("recovered"))
+                ) and not normalized["grounding"].get("manual_review_required", False)
                 normalized["grounding"]["judge_execution"][
                     "score_correction"
                 ] = correction_trace
             return normalized
         except Exception as exc:
-            return _fallback_result(roadmap, exc)
+            fallback = _fallback_result(roadmap, exc)
+            fallback["grounding"]["judge_execution"] = {
+                "strategy": "step_batches_then_summary",
+                "batch_size": _STEP_BATCH_SIZE,
+                "step_batches": batch_traces,
+                "failed_stage": active_stage,
+                "error_type": type(exc).__name__,
+                "failure_trace": getattr(exc, "trace", None),
+            }
+            return fallback

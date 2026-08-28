@@ -11,6 +11,7 @@ import json
 import re
 from typing import Any
 
+from evaluation.metrics.prompt_payloads import compact_roadmap, prompt_json
 from evaluation.structured_output import invoke_json_with_retry
 from src.llm_provider import get_judge_llm
 
@@ -446,7 +447,7 @@ class StructureQualityJudge:
     """Evaluate semantic structure quality with an LLM judge."""
 
     def __init__(self, llm=None):
-        self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=2048)
+        self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=3072)
 
     def evaluate(
         self,
@@ -457,7 +458,7 @@ class StructureQualityJudge:
         prompt = _PROMPT_TEMPLATE.format(
             question=question or "(not provided)",
             category=category or "(not provided)",
-            roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2)[:6000],
+            roadmap=prompt_json(compact_roadmap(roadmap)),
         )
         try:
             parsed, trace = invoke_json_with_retry(

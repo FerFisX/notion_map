@@ -11,6 +11,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from evaluation.metrics.prompt_payloads import (
+    compact_contexts,
+    compact_roadmap,
+    prompt_json,
+)
+from evaluation.structured_output import invoke_json_with_retry
 from src.llm_provider import get_judge_llm
 
 
@@ -168,7 +174,7 @@ def _strip_markdown_json(raw: str) -> str:
 
 
 def _verdict(score: float) -> str:
-    if score >= 7:
+    if score >= 8:
         return "PASS"
     if score >= 5:
         return "NEEDS_REVIEW"
@@ -196,6 +202,7 @@ def _fallback_result(error: Exception | None = None) -> dict:
             "reason": reason,
             "strengths": [],
             "weak_steps": [],
+            "manual_review_required": True,
         },
         "step_overlap": {
             "evaluated": False,
@@ -244,13 +251,14 @@ def _normalize_result(result: dict[str, Any]) -> dict:
 
     normalized_distinctness = {
         "score": score,
-        "verdict": distinctness.get("verdict") or _verdict(score),
-        "score_band": distinctness.get("score_band") or _score_band(score),
+        "verdict": _verdict(score),
+        "score_band": _score_band(score),
         "score_rationale": score_rationale,
         "reason": str(distinctness.get("reason", "")),
         "strengths": distinctness.get("strengths") if isinstance(distinctness.get("strengths"), list) else [],
         "weak_steps": weak_steps,
         "weak_step_count": len(weak_steps),
+        "manual_review_required": False,
     }
 
     normalized_overlap = {
@@ -274,7 +282,7 @@ class StepSemanticJudge:
     """Evaluate step distinctness and conditional overlap with an LLM judge."""
 
     def __init__(self, llm=None):
-        self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=2048)
+        self.llm = llm or get_judge_llm(temperature=0.0, max_tokens=3072)
 
     def evaluate(
         self,
@@ -284,17 +292,42 @@ class StepSemanticJudge:
         contexts: list[str] | None = None,
         category: str = "",
     ) -> dict:
-        context_text = "\n---\n".join(contexts or [])
         prompt = _PROMPT_TEMPLATE.format(
             question=question or "(not provided)",
             refined_question=refined_question or "(not provided)",
             category=category or "(not provided)",
-            context=context_text[:2500] or "(no context provided)",
-            roadmap=json.dumps(roadmap, ensure_ascii=False, indent=2)[:5000],
+            context=(
+                prompt_json(compact_contexts(contexts))
+                if contexts
+                else "(no context provided)"
+            ),
+            roadmap=prompt_json(compact_roadmap(roadmap)),
         )
         try:
-            raw = self.llm.invoke(prompt).content
-            parsed = json.loads(_strip_markdown_json(raw))
-            return _normalize_result(parsed)
+            parsed, trace = invoke_json_with_retry(
+                self.llm,
+                prompt,
+                operation="Step Distinctness and Overlap",
+                parser=lambda raw: _parse_step_response(raw),
+                repair_instruction=(
+                    "Return the complete step_distinctness and step_overlap JSON "
+                    "objects. Preserve exact roadmap step numbers and return no "
+                    "markdown or commentary."
+                ),
+            )
+            normalized = _normalize_result(parsed)
+            normalized["step_distinctness"]["judge_execution"] = trace
+            return normalized
         except Exception as exc:  # keep evaluation runs resilient
             return _fallback_result(exc)
+
+
+def _parse_step_response(raw: str) -> dict[str, Any]:
+    parsed = json.loads(_strip_markdown_json(raw))
+    if not isinstance(parsed, dict):
+        raise ValueError("Step semantic response must be a JSON object")
+    if not isinstance(parsed.get("step_distinctness"), dict):
+        raise ValueError("step_distinctness must be an object")
+    if not isinstance(parsed.get("step_overlap"), dict):
+        raise ValueError("step_overlap must be an object")
+    return parsed
