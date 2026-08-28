@@ -13,6 +13,7 @@ import heapq
 import json
 from typing import Any
 
+from evaluation.metrics.prompt_payloads import compact_contexts, prompt_json
 from evaluation.structured_output import StructuredOutputError, invoke_json_with_retry
 from src.llm_provider import get_judge_llm
 
@@ -790,10 +791,8 @@ class LogicalOrderJudge:
             dependency_prompt = _DEPENDENCY_PROMPT.format(
                 question=question or "(not provided)",
                 category=category or "(not provided)",
-                contexts=json.dumps(contexts or [], ensure_ascii=False, indent=2)[:5000],
-                ordered_steps=json.dumps(
-                    ordered_steps, ensure_ascii=False, indent=2
-                )[:7000],
+                contexts=prompt_json(compact_contexts(contexts)),
+                ordered_steps=prompt_json(ordered_steps),
                 max_edges=max_edges,
             )
             graph_result, graph_trace = invoke_json_with_retry(
@@ -816,12 +815,8 @@ class LogicalOrderJudge:
             if missing_step_ids:
                 missing_prompt = _MISSING_DEPENDENCY_PROMPT.format(
                     question=question or "(not provided)",
-                    contexts=json.dumps(
-                        contexts or [], ensure_ascii=False, indent=2
-                    )[:5000],
-                    ordered_steps=json.dumps(
-                        ordered_steps, ensure_ascii=False, indent=2
-                    )[:7000],
+                    contexts=prompt_json(compact_contexts(contexts)),
+                    ordered_steps=prompt_json(ordered_steps),
                     missing_step_ids=json.dumps(missing_step_ids, indent=2),
                 )
 
@@ -869,10 +864,8 @@ class LogicalOrderJudge:
 
             if indexed_candidates:
                 audit_prompt = _EDGE_AUDIT_PROMPT.format(
-                    steps=json.dumps(steps, ensure_ascii=False, indent=2)[:6500],
-                    contexts=json.dumps(
-                        contexts or [], ensure_ascii=False, indent=2
-                    )[:5000],
+                    steps=prompt_json(ordered_steps),
+                    contexts=prompt_json(compact_contexts(contexts)),
                     candidate_edges=json.dumps(
                         indexed_candidates, ensure_ascii=False, indent=2
                     ),
@@ -915,7 +908,7 @@ class LogicalOrderJudge:
             scoring_prompt = _FINAL_SCORING_PROMPT.format(
                 question=question or "(not provided)",
                 category=category or "(not provided)",
-                steps=json.dumps(steps, ensure_ascii=False, indent=2)[:6500],
+                steps=prompt_json(ordered_steps),
                 analysis=json.dumps(analysis, ensure_ascii=False, indent=2),
                 score_band=mandatory_band,
             )

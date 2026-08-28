@@ -11,6 +11,7 @@ import json
 import re
 from typing import Any
 
+from evaluation.metrics.prompt_payloads import compact_roadmap, prompt_json
 from evaluation.structured_output import invoke_json_with_retry
 from src.llm_provider import get_judge_llm, invoke_llm_text
 
@@ -979,9 +980,7 @@ class ActionabilityJudge:
                 prompt = _PROMPT_TEMPLATE.format(
                     question=question or "(not provided)",
                     category=category or "(not provided)",
-                    roadmap=json.dumps(
-                        batch_roadmap, ensure_ascii=False, indent=2
-                    )[:7000],
+                    roadmap=prompt_json(compact_roadmap(batch_roadmap)),
                 ) + _PER_STEP_STAGE_OVERRIDE
                 operation = (
                     f"Actionability step batch {batch_index}/{len(batches)}"
@@ -1085,9 +1084,7 @@ class ActionabilityJudge:
             summary_prompt = _SUMMARY_PROMPT.format(
                 question=question or "(not provided)",
                 category=category or "(not provided)",
-                step_evidence=json.dumps(
-                    step_evidence, ensure_ascii=False, indent=2
-                )[:7000],
+                step_evidence=prompt_json(step_evidence),
             )
             summary_result, summary_trace = invoke_json_with_retry(
                 self.llm,
