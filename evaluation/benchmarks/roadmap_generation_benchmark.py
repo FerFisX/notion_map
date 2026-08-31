@@ -23,6 +23,7 @@ from evaluation.metrics.structure_validator import StructureValidator
 from evaluation.rag_adapter import RagAdapter
 from evaluation.tracking import log_generation_benchmark
 from src.llm_provider import active_model_name
+from src.source_modes import timeout_for_mode
 from src.rag_engine import (
     GENERATION_MAX_OUTPUT_TOKENS,
     QUERY_PREPROCESSING_REASONING_MODE,
@@ -30,9 +31,6 @@ from src.rag_engine import (
 
 
 DEFAULT_SAMPLE_INDICES = tuple(range(15, 45))
-TARGET_SECONDS = 120.0
-
-
 def _parse_indices(value: str) -> list[int]:
     try:
         indices = [int(item.strip()) for item in value.split(",") if item.strip()]
@@ -65,7 +63,7 @@ def _mlflow_metrics(summary: dict[str, Any]) -> dict[str, float]:
         "generation.failure_count": summary["generation_failure_count"],
         "generation.success_rate": summary["generation_success_rate"],
         "generation.web_requirement_pass_rate": summary["web_requirement_pass_rate"],
-        "generation.within_120s_rate": summary["within_target_rate"],
+        "generation.within_target_rate": summary["within_target_rate"],
         "generation.total.mean_s": total["mean_s"],
         "generation.total.min_s": total["min_s"],
         "generation.total.max_s": total["max_s"],
@@ -149,7 +147,9 @@ def run(
     run_name: str,
     output_dir: str | Path,
     mlflow_enabled: bool = True,
+    source_mode: str = "auto",
 ) -> Path:
+    target_seconds = timeout_for_mode(source_mode)
     run_dir = _run_directory(output_dir, run_name)
     print(f"Run directory: {run_dir}")
     initialization_started = time.perf_counter()
@@ -164,7 +164,7 @@ def run(
         sample = EVAL_SAMPLES[sample_index - 1]
         print(f"\n[{position}/{len(sample_indices)}] {sample.question}")
         started = time.perf_counter()
-        generated = adapter.query(sample.question)
+        generated = adapter.query(sample.question, source_mode=source_mode)
         observed_total_s = round(time.perf_counter() - started, 4)
         roadmap = generated.get("roadmap", {})
         succeeded = roadmap.get("title") != "Error" and bool(roadmap.get("steps"))
@@ -184,7 +184,7 @@ def run(
             "question": sample.question,
             "category": sample.category,
             "observed_total_s": observed_total_s,
-            "within_target": observed_total_s <= TARGET_SECONDS,
+            "within_target": observed_total_s <= target_seconds,
             "generation_succeeded": succeeded,
             "web_required": web_required,
             "web_requirement_passed": web_requirement_passed,
@@ -210,12 +210,12 @@ def run(
             f"target={'PASS' if result['within_target'] else 'ABOVE'}"
         )
 
-    summary = _aggregate(results, initialization_s)
+    summary = _aggregate(results, initialization_s, target_seconds)
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "benchmark": "roadmap_generation_v1",
         "configuration": {
-            "provider": os.getenv("LLM_PROVIDER", "bedrock").lower().strip(),
+            "provider": os.getenv("LLM_PROVIDER", "ollama").lower().strip(),
             "model": active_model_name(),
             "generation_reasoning_mode": os.getenv(
                 "LLM_GENERATION_REASONING_MODE", "provider_default"
@@ -275,7 +275,8 @@ def run(
                 "unknown",
             ),
             "sample_indices": sample_indices,
-            "target_seconds": TARGET_SECONDS,
+            "source_mode": source_mode,
+            "target_seconds": target_seconds,
         },
         "summary": summary,
         "results": results,
@@ -335,6 +336,12 @@ def main() -> None:
     parser.add_argument("--run-name", default="roadmap-generation-baseline-v1")
     parser.add_argument("--output-dir", default=config.reports_dir)
     parser.add_argument("--no-mlflow", action="store_true")
+    parser.add_argument(
+        "--source-mode",
+        choices=("corpus", "web", "auto"),
+        default="auto",
+        help="Evidence policy used for every generated roadmap.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     try:
@@ -343,9 +350,10 @@ def main() -> None:
         parser.error(str(exc))
     if args.dry_run:
         print("Roadmap generation benchmark")
-        print(f"  Provider: {os.getenv('LLM_PROVIDER', 'bedrock')}")
+        print(f"  Provider: {os.getenv('LLM_PROVIDER', 'ollama')}")
         print(f"  Model: {active_model_name()}")
-        print(f"  Target: <= {TARGET_SECONDS:.0f}s per roadmap")
+        print(f"  Target: <= {timeout_for_mode(args.source_mode):.0f}s per roadmap")
+        print(f"  Source mode: {args.source_mode}")
         print(f"  Max output tokens: {GENERATION_MAX_OUTPUT_TOKENS}")
         print(
             "  Generation reasoning: "
@@ -365,7 +373,13 @@ def main() -> None:
             print(f"  {index}: [{sample.category}] {sample.question}{web}")
         print("  Judge calls: 0")
         return
-    run(indices, args.run_name, args.output_dir, not args.no_mlflow)
+    run(
+        indices,
+        args.run_name,
+        args.output_dir,
+        not args.no_mlflow,
+        args.source_mode,
+    )
 
 
 if __name__ == "__main__":

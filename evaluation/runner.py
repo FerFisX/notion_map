@@ -70,7 +70,7 @@ def _preflight(
     if mode != "corpus":
         checks.append((bool(samples), f"Samples selected: {len(samples)}", True))
 
-    provider = os.getenv("LLM_PROVIDER", "bedrock").lower().strip()
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower().strip()
     model = active_model_name()
     checks.append((provider in {"bedrock", "anthropic", "openai", "gemini", "ollama"}, f"Provider: {provider} | model: {model}", True))
     credential_vars = {
@@ -284,7 +284,7 @@ def run(
                 samples,
                 metadata={
                     "model": active_model_name(),
-                    "llm_provider": os.getenv("LLM_PROVIDER", "bedrock"),
+                    "llm_provider": os.getenv("LLM_PROVIDER", "ollama"),
                     "ollama_seed": os.getenv("OLLAMA_SEED", ""),
                 },
             )
@@ -406,7 +406,7 @@ def run(
     params = {
         "mode": mode,
         "model": active_model_name(),
-        "llm_provider": os.getenv("LLM_PROVIDER", "bedrock"),
+        "llm_provider": os.getenv("LLM_PROVIDER", "ollama"),
         "n_samples": len(samples) if mode != "corpus" else 0,
         "metrics": (
             ",".join(selected_metrics or list(_ORCHESTRATOR_NAMES.values()))

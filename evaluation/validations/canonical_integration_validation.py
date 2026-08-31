@@ -453,13 +453,13 @@ def _case_manifest(cases: list[ControlledCase]) -> list[dict[str, Any]]:
 def _execution_config() -> dict[str, Any]:
     """Capture provider-neutral settings that can explain run variation."""
     return {
-        "provider": os.getenv("LLM_PROVIDER", "bedrock").strip().lower(),
+        "provider": os.getenv("LLM_PROVIDER", "ollama").strip().lower(),
         "model": active_model_name(),
         "judge_temperature": config.judge_temperature,
         "judge_reasoning_mode": os.getenv(
             "LLM_JUDGE_REASONING_MODE", "disabled"
         ).strip().lower(),
-        "request_timeout_seconds": os.getenv("LLM_REQUEST_TIMEOUT", "300").strip(),
+        "request_timeout_seconds": os.getenv("LLM_REQUEST_TIMEOUT", "210").strip(),
         "ollama_seed": os.getenv("OLLAMA_SEED", "").strip() or None,
         "metric_contract": "canonical_v1",
         "evaluation_source_sha256": _evaluation_source_fingerprint(),

@@ -102,7 +102,7 @@ def get_llm(
     Devuelve el LLM configurado en LLM_PROVIDER.
     Lanza ValueError si el proveedor no está soportado o faltan credenciales.
     """
-    provider = os.getenv("LLM_PROVIDER", "bedrock").lower().strip()
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower().strip()
     timeout = _request_timeout(request_timeout)
     reasoning_mode = reasoning_mode.lower().strip()
     if reasoning_mode not in {"provider_default", "disabled", "enabled"}:
@@ -164,7 +164,7 @@ def get_llm(
         from langchain_ollama import ChatOllama
 
         ollama_kwargs = {
-            "model": os.getenv("OLLAMA_MODEL_ID", "llama3.2"),
+            "model": os.getenv("OLLAMA_MODEL_ID", "qwen3:8b"),
             "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             "temperature": temperature,
             "num_predict": max_tokens,
@@ -318,6 +318,7 @@ def invoke_llm_text(
     *,
     operation: str,
     attempt: int = 1,
+    timeout_seconds: float | None = None,
 ) -> str:
     """Invoke any configured provider with consistent attempt observability."""
     text, _ = invoke_llm_with_trace(
@@ -325,13 +326,14 @@ def invoke_llm_text(
         prompt,
         operation=operation,
         attempt=attempt,
+        timeout_seconds=timeout_seconds,
     )
     return text
 
 
 def active_model_name() -> str:
     """Nombre legible del modelo activo — para logs y reportes."""
-    provider = os.getenv("LLM_PROVIDER", "bedrock").lower().strip()
+    provider = os.getenv("LLM_PROVIDER", "ollama").lower().strip()
     if provider == "bedrock":
         return os.getenv("BEDROCK_MODEL_ID", "bedrock-default")
     if provider == "anthropic":
@@ -341,7 +343,7 @@ def active_model_name() -> str:
     if provider == "gemini":
         return os.getenv("GEMINI_MODEL_ID", "gemini-2.0-flash")
     if provider == "ollama":
-        return os.getenv("OLLAMA_MODEL_ID", "ollama-default")
+        return os.getenv("OLLAMA_MODEL_ID", "qwen3:8b")
     return provider
 
 

@@ -8,6 +8,7 @@ para responder la consulta actual y NO se guarda en la base de conocimiento.
 from __future__ import annotations
 
 import re
+import unicodedata
 from urllib.parse import urlparse
 
 
@@ -27,6 +28,49 @@ _DOCUMENTATION_PATH_MARKERS = (
     "/userguide/",
 )
 _SECONDARY_PATH_MARKERS = ("/article/", "/articles/", "/blog/", "/blogs/")
+_QUERY_STOPWORDS = {
+    "a", "al", "ante", "como", "con", "considerando", "cual", "cuales",
+    "cuando", "de", "del", "desde", "donde", "el", "en", "entre", "es",
+    "esta", "estas", "este", "estos", "hacer", "la", "las", "lo", "los",
+    "manera", "me", "mediante", "mi", "para", "pero", "por", "puedo", "que",
+    "se", "segun", "ser", "sin", "sobre", "su", "sus", "un", "una", "usar",
+    "and", "can", "do", "for", "from", "how", "in", "into", "is", "of",
+    "on", "or", "the", "to", "using", "what", "when", "with",
+}
+
+_CURRENT_INFORMATION_PHRASES = (
+    "actualmente",
+    "vigente",
+    "documentacion vigente",
+    "informacion vigente",
+    "mas reciente",
+    "modelo vigente",
+    "modelos vigentes",
+    "precio vigente",
+    "precios vigentes",
+    "version actual",
+    "version vigente",
+    "current version",
+    "currently available",
+    "latest release",
+    "latest update",
+    "up to date",
+)
+
+
+def _search_normalized_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", str(value or ""))
+    without_accents = "".join(
+        character for character in decomposed
+        if not unicodedata.combining(character)
+    )
+    return " ".join(without_accents.casefold().split())
+
+
+def requires_current_web_evidence(query: str) -> bool:
+    """Return whether the request explicitly requires time-sensitive evidence."""
+    normalized = _search_normalized_text(query)
+    return any(phrase in normalized for phrase in _CURRENT_INFORMATION_PHRASES)
 
 def prepare_web_query(query: str, max_chars: int = 300) -> str:
     """Return a compact, provider-independent query suitable for a web engine.
@@ -43,6 +87,57 @@ def prepare_web_query(query: str, max_chars: int = 300) -> str:
     if " " in truncated:
         truncated = truncated.rsplit(" ", 1)[0]
     return truncated.rstrip(" ,;:-")
+
+
+def compact_web_query(query: str, max_terms: int = 14) -> str:
+    """Reduce a natural-language question to stable search terms.
+
+    The transformation is deterministic and preserves product names, acronyms,
+    versions, and technical terms without depending on the active LLM.
+    """
+    normalized = prepare_web_query(query)
+    tokens = re.findall(r"[^\W_]+(?:[.+#/-][^\W_]+)*", normalized, re.UNICODE)
+    selected: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        key = "".join(
+            character
+            for character in unicodedata.normalize("NFKD", token)
+            if not unicodedata.combining(character)
+        ).casefold()
+        if key in _QUERY_STOPWORDS or key in seen:
+            continue
+        if len(key) < 2 and not any(character.isdigit() for character in key):
+            continue
+        selected.append(token)
+        seen.add(key)
+        if len(selected) >= max_terms:
+            break
+    return " ".join(selected)
+
+
+def build_web_query_candidates(
+    primary_query: str,
+    refined_query: str | None = None,
+    max_variants: int = 3,
+) -> list[str]:
+    """Build ordered, provider-independent search fallbacks."""
+    raw_candidates = [
+        prepare_web_query(primary_query),
+        compact_web_query(primary_query),
+        compact_web_query(refined_query or ""),
+    ]
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for candidate in raw_candidates:
+        key = candidate.casefold().strip()
+        if not key or key in seen:
+            continue
+        candidates.append(candidate)
+        seen.add(key)
+        if len(candidates) >= max_variants:
+            break
+    return candidates
 
 
 def rank_web_results(query: str, results: list[dict]) -> list[dict]:
@@ -94,13 +189,15 @@ def rank_web_results(query: str, results: list[dict]) -> list[dict]:
     return sorted(deduplicated, key=score, reverse=True)
 
 
-def search_web(query: str, max_results: int = 4, fetch_full: bool = True) -> list[str]:
-    """
-    Busca en internet y devuelve fragmentos de texto listos para usar como contexto.
+def search_web_sources(
+    query: str,
+    max_results: int = 4,
+    fetch_full: bool = True,
+) -> list[dict[str, str]]:
+    """Return structured, traceable web evidence.
 
-    Cada fragmento incluye el título y la URL de origen para trazabilidad.
-    Si fetch_full está activo, intenta descargar y convertir la página completa
-    con markitdown; si falla, usa el resumen que devuelve el buscador.
+    Search snippets are used only when full-page extraction fails.  The caller
+    can distinguish that weaker evidence through ``content_origin``.
     """
     try:
         from ddgs import DDGS
@@ -120,23 +217,40 @@ def search_web(query: str, max_results: int = 4, fetch_full: bool = True) -> lis
         return []
 
     results = rank_web_results(query, results)[:max_results]
+    sources: list[dict[str, str]] = []
+    for index, result in enumerate(results, 1):
+        title = str(result.get("title", "")).strip()
+        url = str(result.get("href", "")).strip()
+        snippet = str(result.get("body", "")).strip()
+        full_content = _fetch_page(url) if fetch_full and url else ""
+        text = full_content or snippet
+        if not url or not text:
+            continue
+        sources.append({
+            "id": f"web_{index}",
+            "source_type": "web",
+            "title": title or url,
+            "url": url,
+            "text": text,
+            "content_origin": "page" if full_content else "search_snippet",
+        })
 
-    contexts = []
-    for r in results:
-        title = r.get("title", "")
-        href  = r.get("href", "")
-        body  = r.get("body", "")
-        content = body
+    print(f"  [Web] {len(sources)} fuentes recuperadas de internet (efímeras).")
+    return sources
 
-        if fetch_full and href:
-            full = _fetch_page(href)
-            if full:
-                content = full
 
-        contexts.append(f"[Fuente web: {title} — {href}]\n{content}".strip())
+def search_web(query: str, max_results: int = 4, fetch_full: bool = True) -> list[str]:
+    """
+    Busca en internet y devuelve fragmentos de texto listos para usar como contexto.
 
-    print(f"  [Web] {len(contexts)} fuentes recuperadas de internet (efímeras).")
-    return contexts
+    Cada fragmento incluye el título y la URL de origen para trazabilidad.
+    Si fetch_full está activo, intenta descargar y convertir la página completa
+    con markitdown; si falla, usa el resumen que devuelve el buscador.
+    """
+    return [
+        f"[Fuente web: {source['title']} — {source['url']}]\n{source['text']}"
+        for source in search_web_sources(query, max_results, fetch_full)
+    ]
 
 
 def _fetch_page(url: str, max_chars: int = 3000) -> str:
