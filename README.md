@@ -50,3 +50,45 @@ La sincronización es incremental: procesa únicamente páginas nuevas o modific
 - Páginas omitidas por errores: `data/notion_exports/skipped_pages.json`
 
 Si una página no se procesa, verifica que la integración tenga acceso a ella y revisa el reporte de páginas omitidas.
+
+## Generación con fuentes verificables
+
+La interfaz permite seleccionar una política de fuentes antes de generar:
+
+- **Base interna (`corpus`)**: utiliza exclusivamente Chroma/Notion.
+- **Fuentes web (`web`)**: utiliza exclusivamente páginas recuperadas por web search.
+- **Selección automática (`auto`)**: elige corpus, web o una combinación según la cobertura. Es el modo predeterminado.
+
+Todos los modos exigen evidencia para cada paso. Si las fuentes no permiten
+respaldar el roadmap, el sistema devuelve `INSUFFICIENT_EVIDENCE` en lugar de
+completar la respuesta con conocimiento de entrenamiento del modelo.
+
+Los límites end-to-end predeterminados son 120 segundos para corpus, 300 para
+web y 210 para automático. Se pueden configurar con
+`CORPUS_MODE_TIMEOUT`, `WEB_MODE_TIMEOUT` y `AUTO_MODE_TIMEOUT`.
+
+### Ejecutar localmente con Ollama
+
+Configura `.env`:
+
+```env
+LLM_PROVIDER=ollama
+OLLAMA_MODEL_ID=qwen3:8b
+OLLAMA_BASE_URL=http://localhost:11434
+LLM_GENERATION_REASONING_MODE=disabled
+LLM_JUDGE_REASONING_MODE=disabled
+```
+
+Después inicia la aplicación:
+
+```bash
+python -m uvicorn api.main:app --reload
+```
+
+Abre `http://127.0.0.1:8000` y selecciona el modo antes de enviar la pregunta.
+
+Para un smoke de developer sin MLflow:
+
+```bash
+python -m evaluation.benchmarks.roadmap_generation_benchmark --sample-indices 15 --source-mode corpus --run-name corpus-ollama-smoke --no-mlflow
+```

@@ -11,15 +11,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 @dataclass
 class EvalConfig:
-    # LLM
-    bedrock_model_id: str = field(
-        default_factory=lambda: os.getenv(
-            "BEDROCK_MODEL_ID", "anthropic.claude-3-5-haiku-20241022-v1:0"
-        )
-    )
-    aws_region: str = field(
-        default_factory=lambda: os.getenv("AWS_DEFAULT_REGION", "us-east-1")
-    )
+    # Provider-neutral LLM settings
     judge_temperature: float = 0.0
 
     # RAGAS

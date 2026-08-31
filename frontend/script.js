@@ -6,6 +6,7 @@ var cy = cytoscape({
         // Color según la fuente predominante del nodo
         { selector: 'node[type="main"][source="corpus"]', style: { 'background-color': '#e6f7ff', 'border-color': '#1890ff' } },
         { selector: 'node[type="main"][source="web"]',    style: { 'background-color': '#fff7e6', 'border-color': '#fa8c16' } },
+        { selector: 'node[type="main"][source="hybrid"]', style: { 'background-color': '#f3e8ff', 'border-color': '#722ed1' } },
         { selector: 'node[type="sub"]', style: { 'label': 'data(label)', 'shape': 'tag', 'width': '140px', 'height': '40px', 'background-color': '#fffbe6', 'border-color': '#ffe58f', 'border-width': 1, 'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'wrap', 'text-max-width': '120px', 'font-size': '10px', 'color': '#555' } },
         { selector: 'edge', style: { 'width': 2, 'line-color': '#ccc', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } },
         { selector: ':selected', style: { 'border-width': 4, 'border-color': '#1890ff' } }
@@ -17,23 +18,197 @@ const API_URL = "/generate-roadmap";
 // --- 2. MEMORIA GLOBAL (CACHÉ) ---
 // Aquí guardamos los datos de cada nodo para no tener que pedirlos de nuevo
 // Clave: ID del DOM del nodo en la barra lateral. Valor: Objeto JSON con steps.
-const nodeDataCache = {}; 
+const nodeDataCache = {};
 let activeDomId = null; // Cuál nodo de la barra lateral estamos viendo actualmente
+let activeSourceMode = 'auto';
+let generationInProgress = false;
+let loadingMessageTimer = null;
+
+const loadingMessages = [
+    'Preparando la consulta...',
+    'Buscando información...',
+    'Organizando los pasos...',
+    'Validando las fuentes...',
+    'Finalizando detalles...'
+];
+
+function startLoadingState() {
+    if (generationInProgress) return false;
+
+    hideUserMessage();
+    generationInProgress = true;
+    const loading = document.getElementById('loading');
+    const loadingMessage = document.getElementById('loadingMessage');
+    const generateButton = document.getElementById('generateButton');
+    const sourceMode = document.getElementById('sourceMode');
+    let messageIndex = 0;
+
+    loadingMessage.innerText = loadingMessages[messageIndex];
+    loading.classList.remove('hidden');
+    generateButton.disabled = true;
+    generateButton.innerText = 'Generando...';
+    sourceMode.disabled = true;
+
+    loadingMessageTimer = window.setInterval(() => {
+        messageIndex = Math.min(messageIndex + 1, loadingMessages.length - 1);
+        loadingMessage.innerText = loadingMessages[messageIndex];
+        if (messageIndex === loadingMessages.length - 1) {
+            window.clearInterval(loadingMessageTimer);
+            loadingMessageTimer = null;
+        }
+    }, 20000);
+
+    return true;
+}
+
+function stopLoadingState() {
+    if (loadingMessageTimer) {
+        window.clearInterval(loadingMessageTimer);
+        loadingMessageTimer = null;
+    }
+
+    generationInProgress = false;
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('loadingMessage').innerText = loadingMessages[0];
+    const generateButton = document.getElementById('generateButton');
+    generateButton.disabled = false;
+    generateButton.innerText = 'Generar Roadmap';
+    document.getElementById('sourceMode').disabled = false;
+}
 
 // --- 3. FUNCIÓN PRINCIPAL DE CARGA ---
+function createRequestError(data, response) {
+    const error = new Error(
+        data?.message || data?.detail || data?.title || `HTTP ${response.status}`
+    );
+    error.status = String(data?.status || 'TECHNICAL_ERROR').toUpperCase();
+    error.httpStatus = response.status;
+    return error;
+}
+
+function hideUserMessage() {
+    const message = document.getElementById('userMessage');
+    if (!message) return;
+    message.classList.add('hidden');
+    message.classList.remove('technical');
+    document.getElementById('userMessageActions').replaceChildren();
+}
+
+function addUserMessageAction(label, callback) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.innerText = label;
+    button.addEventListener('click', callback);
+    document.getElementById('userMessageActions').appendChild(button);
+}
+
+function retryCurrentQuestion() {
+    hideUserMessage();
+    handleSearch();
+}
+
+function editCurrentQuestion() {
+    hideUserMessage();
+    document.getElementById('queryInput').focus();
+}
+
+function selectSourceMode(mode) {
+    const selector = document.getElementById('sourceMode');
+    selector.value = mode;
+    activeSourceMode = mode;
+    selector.dispatchEvent(new Event('change'));
+    hideUserMessage();
+    selector.focus();
+}
+
+function focusSourceMode() {
+    document.getElementById('sourceMode').focus();
+}
+
+function showUserError(error) {
+    const status = String(error?.status || 'TECHNICAL_ERROR').toUpperCase();
+    const message = document.getElementById('userMessage');
+    const title = document.getElementById('userMessageTitle');
+    const text = document.getElementById('userMessageText');
+
+    message.classList.remove('hidden', 'technical');
+    document.getElementById('userMessageActions').replaceChildren();
+
+    if (status === 'INSUFFICIENT_EVIDENCE') {
+        if (activeSourceMode === 'corpus') {
+            title.innerText = 'No encontramos suficiente información en la base interna';
+            text.innerText = 'No podemos crear un roadmap confiable con las fuentes disponibles. Prueba con el modo Automático o Fuentes Web.';
+            addUserMessageAction('Cambiar a Automático', () => selectSourceMode('auto'));
+            addUserMessageAction('Cambiar a Web', () => selectSourceMode('web'));
+        } else if (activeSourceMode === 'web') {
+            title.innerText = 'No encontramos fuentes web suficientes';
+            text.innerText = 'No fue posible recuperar información confiable en este momento. Puedes intentarlo nuevamente o reformular la pregunta.';
+            addUserMessageAction('Intentar nuevamente', retryCurrentQuestion);
+        } else {
+            title.innerText = 'No encontramos evidencia suficiente';
+            text.innerText = 'Las fuentes disponibles no permiten crear un roadmap confiable. Intenta reformular la pregunta o seleccionar otra fuente.';
+            addUserMessageAction('Intentar nuevamente', retryCurrentQuestion);
+            addUserMessageAction('Cambiar modo', focusSourceMode);
+        }
+        addUserMessageAction('Editar pregunta', editCurrentQuestion);
+        return;
+    }
+
+    if (status === 'TIMEOUT') {
+        title.innerText = 'La generación está tomando más tiempo del esperado';
+        text.innerText = 'El proceso se detuvo para evitar una espera excesiva. Inténtalo nuevamente o prueba con otro modo de fuentes.';
+        addUserMessageAction('Intentar nuevamente', retryCurrentQuestion);
+        addUserMessageAction('Cambiar modo', focusSourceMode);
+        return;
+    }
+
+    if (status === 'GROUNDING_REVIEW_REQUIRED') {
+        title.innerText = 'No pudimos verificar toda la información';
+        text.innerText = 'El roadmap no fue mostrado porque algunos pasos no tenían respaldo suficiente en las fuentes recuperadas.';
+        addUserMessageAction('Intentar nuevamente', retryCurrentQuestion);
+        addUserMessageAction('Editar pregunta', editCurrentQuestion);
+        addUserMessageAction('Cambiar modo', focusSourceMode);
+        return;
+    }
+
+    message.classList.add('technical');
+    title.innerText = 'No pudimos completar la solicitud';
+    text.innerText = 'Ocurrió un problema inesperado. Inténtalo nuevamente y, si continúa, informa al equipo técnico.';
+    addUserMessageAction('Intentar nuevamente', retryCurrentQuestion);
+}
+
+document.getElementById('dismissUserMessage').addEventListener('click', hideUserMessage);
+
 async function fetchRoadmap(question, parentDomId = null, nodeLabel = "Inicio", nodeDesc = "") {
-    const loading = document.getElementById('loading');
-    loading.classList.remove('hidden');
+    if (!startLoadingState()) return;
 
     try {
         const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question: question })
+            body: JSON.stringify({
+                question: question,
+                source_mode: activeSourceMode
+            })
         });
         const data = await response.json();
 
-        if (!data.steps && data.title !== "Error") throw new Error("Datos incorrectos");
+        if (!response.ok) {
+            throw createRequestError(data, response);
+        }
+        if (data.status && data.status !== 'ACCEPTED') {
+            throw createRequestError(data, response);
+        }
+
+        if (!data.steps && data.title !== "Error") {
+            throw createRequestError(
+                {
+                    status: 'TECHNICAL_ERROR',
+                    message: 'The roadmap response did not include a valid steps collection.'
+                },
+                response
+            );
+        }
 
         // LÓGICA DE ÁRBOL
         if (parentDomId) {
@@ -76,10 +251,14 @@ async function fetchRoadmap(question, parentDomId = null, nodeLabel = "Inicio", 
         }
 
     } catch (e) {
-        alert("Error: " + e.message);
-        console.error(e);
+        console.error('Roadmap request failed', {
+            status: e.status || 'TECHNICAL_ERROR',
+            detail: e.message,
+            error: e
+        });
+        showUserError(e);
     } finally {
-        loading.classList.add('hidden');
+        stopLoadingState();
     }
 }
 
@@ -97,6 +276,7 @@ function createSidebarNode(step, container, parentDomId) {
     nodeDataCache[domId] = {
         label: step.label,
         description: step.description,
+        evidenceIds: step.evidence_ids || [],
         parentId: parentDomId,
         data: null // Aquí se guardará el gráfico de sus hijos cuando se cargue
     };
@@ -151,7 +331,11 @@ function handleNodeClick(domId) {
         console.log("Cargando desde caché:", nodeInfo.label);
         renderGraph(nodeInfo.data);
         generateBreadcrumbs(domId);
-        updateContextBanner(nodeInfo.label, nodeInfo.description);
+        updateContextBanner(
+            nodeInfo.label,
+            nodeInfo.description,
+            nodeInfo.evidenceIds
+        );
         
         // Asegurar que la carpeta esté abierta visualmente
         const childrenContainer = document.getElementById(domId + "-children");
@@ -163,6 +347,7 @@ function handleNodeClick(domId) {
     } 
     // ESCENARIO 2: Es la primera vez (Hacer Drill Down real)
     else {
+        if (!startLoadingState()) return;
         console.log("Descargando datos para:", nodeInfo.label);
         const icon = document.getElementById(domId).querySelector('.node-icon');
         if(icon) icon.innerText = "⏳";
@@ -172,12 +357,28 @@ function handleNodeClick(domId) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                question: `Detalles técnicos paso a paso de: "${nodeInfo.label}". Contexto: ${nodeInfo.description || ""}` 
+                question: `Detalles técnicos paso a paso de: "${nodeInfo.label}". Contexto: ${nodeInfo.description || ""}`,
+                source_mode: activeSourceMode
             })
         })
-        .then(res => res.json())
+        .then(async res => {
+            const data = await res.json();
+            if (!res.ok) throw createRequestError(data, res);
+            if (data.status && data.status !== 'ACCEPTED') {
+                throw createRequestError(data, res);
+            }
+            return data;
+        })
         .then(data => {
-            if (!data.steps) throw new Error("Error API");
+            if (!data.steps) {
+                throw createRequestError(
+                    {
+                        status: 'TECHNICAL_ERROR',
+                        message: 'The roadmap response did not include a valid steps collection.'
+                    },
+                    { status: 200 }
+                );
+            }
             
             // Guardar en caché
             nodeInfo.data = data;
@@ -188,11 +389,23 @@ function handleNodeClick(domId) {
             // Renderizar gráfico
             renderGraph(data);
             generateBreadcrumbs(domId);
-            updateContextBanner(nodeInfo.label, nodeInfo.description);
+            updateContextBanner(
+                nodeInfo.label,
+                nodeInfo.description,
+                nodeInfo.evidenceIds
+            );
         })
         .catch(err => {
-            alert("Error: " + err.message);
+            console.error('Roadmap drill-down request failed', {
+                status: err.status || 'TECHNICAL_ERROR',
+                detail: err.message,
+                error: err
+            });
+            showUserError(err);
             if(icon) icon.innerText = "▶";
+        })
+        .finally(() => {
+            stopLoadingState();
         });
     }
 }
@@ -297,18 +510,47 @@ function updateSourceMetrics(sources) {
     const modeLabels = {
         corpus: 'Solo base de conocimiento',
         hybrid: 'Híbrido (corpus + web)',
-        web:    'Mayormente web',
+        web:    'Solo fuentes web',
         error:  'Error'
     };
     const mode = sources.mode || 'corpus';
     document.getElementById('smMode').innerText = modeLabels[mode] || mode;
+
+    const sourceList = document.getElementById('smSources');
+    sourceList.replaceChildren();
+    (sources.items || []).forEach(source => {
+        const row = document.createElement('div');
+        row.className = 'sm-source';
+        const label = `${formatSourceId(source.id)}: ${source.title || formatSourceId(source.source_type)}`;
+        if (source.url) {
+            const link = document.createElement('a');
+            link.href = source.url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = label;
+            row.appendChild(link);
+        } else {
+            row.textContent = label;
+        }
+        sourceList.appendChild(row);
+    });
 }
 
-function updateContextBanner(title, desc) {
+function formatSourceId(sourceId) {
+    return String(sourceId || 'Fuente')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function updateContextBanner(title, desc, evidenceIds = []) {
     const banner = document.getElementById('activeContext');
     banner.classList.remove('hidden');
     document.getElementById('contextTitle').innerText = title;
-    document.getElementById('contextDesc').innerText = desc || "Detalle técnico";
+    const evidence = evidenceIds.length
+        ? `\nFuentes: ${evidenceIds.map(formatSourceId).join(', ')}`
+        : '';
+    document.getElementById('contextDesc').innerText =
+        (desc || "Detalle técnico") + evidence;
 }
 
 // Doble Clic en el Gráfico -> Busca el nodo en el árbol y lo clickea
@@ -328,8 +570,20 @@ cy.on('dblclick', 'node[type="main"]', function(evt){
 });
 
 function handleSearch() {
+    if (generationInProgress) return;
     const q = document.getElementById('queryInput').value;
+    activeSourceMode = document.getElementById('sourceMode').value;
     if(q) fetchRoadmap(q);
 }
 
+const sourceModeHelp = {
+    corpus: 'Usa únicamente la base interna y rechaza contenido sin respaldo.',
+    web: 'Usa únicamente páginas web recuperadas y citadas.',
+    auto: 'Combina las fuentes disponibles y exige evidencia para cada paso.'
+};
+
+document.getElementById('sourceMode').addEventListener('change', (event) => {
+    document.getElementById('sourceModeHelp').innerText =
+        sourceModeHelp[event.target.value];
+});
 document.getElementById('queryInput').addEventListener("keypress", (e) => { if(e.key==="Enter") handleSearch() });

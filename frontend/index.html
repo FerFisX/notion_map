@@ -21,11 +21,33 @@
         
         <div class="input-group">
             <input type="text" id="queryInput" placeholder="Ej: Pasos para definir alcance...">
-            <button onclick="handleSearch()">Generar Roadmap</button>
+            <label for="sourceMode">Fuentes</label>
+            <select id="sourceMode">
+                <option value="auto" selected>Selección automática</option>
+                <option value="corpus">Base interna</option>
+                <option value="web">Fuentes web</option>
+            </select>
+            <small id="sourceModeHelp">
+                Combina las fuentes disponibles y exige evidencia para cada paso.
+            </small>
+            <button id="generateButton" type="button" onclick="handleSearch()">
+                Generar Roadmap
+            </button>
         </div>
 
-        <div id="loading" class="hidden">
-            Analizando documentos...
+        <div id="loading" class="loading-state hidden" role="status" aria-live="polite">
+            <span class="loading-spinner" aria-hidden="true"></span>
+            <span id="loadingMessage">Preparando la consulta...</span>
+        </div>
+
+        <div id="userMessage" class="user-message hidden" role="alert" aria-live="assertive">
+            <div class="user-message-icon" aria-hidden="true">!</div>
+            <div class="user-message-content">
+                <strong id="userMessageTitle"></strong>
+                <p id="userMessageText"></p>
+                <div id="userMessageActions" class="user-message-actions"></div>
+            </div>
+            <button id="dismissUserMessage" class="user-message-dismiss" type="button" aria-label="Cerrar mensaje">×</button>
         </div>
 
         <div class="instructions">
@@ -73,6 +95,7 @@
                 <b id="smWeb">0%</b>
             </div>
             <div id="smMode" class="sm-mode">—</div>
+            <div id="smSources" class="sm-sources"></div>
         </div>
 
         <div id="cy"></div>

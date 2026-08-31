@@ -13,7 +13,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 sys.path.append(BASE_DIR)
 
-from src.rag_engine import RagEngine
+from src.rag_engine import AUTO_WEB_THRESHOLD, RagEngine
+from src.source_modes import SourceMode
 
 engine = None
 
@@ -56,12 +57,13 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     question: str
+    source_mode: SourceMode = SourceMode.AUTO
 
 @app.post("/generate-roadmap")
 async def generate_roadmap_endpoint(request: QueryRequest):
     if not engine:
         raise HTTPException(status_code=503, detail="Motor no iniciado. Revisa la terminal.")
-    return engine.generate_roadmap(request.question)
+    return engine.generate_roadmap(request.question, request.source_mode)
 
 
 @app.post("/sync-notion")
@@ -168,7 +170,7 @@ async def eval_pipeline(req: PipelineRequest):
             "why":   "Permite responder aunque la base de conocimiento no cubra el tema. El contenido es efímero: no se guarda en el corpus.",
             "result": {
                 "best_corpus_score": round(best, 4),
-                "umbral":            float(__import__("os").getenv("WEB_FALLBACK_THRESHOLD", "0.25")),
+                "umbral":            AUTO_WEB_THRESHOLD,
                 "corpus_suficiente": covers,
                 "web_activado":      web_used,
                 "fuentes_web":       web_sources,

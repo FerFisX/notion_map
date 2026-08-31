@@ -13,12 +13,12 @@ class RagAdapter:
     """Envuelve RagEngine y expone lo que necesitan RAGAS y LLM Judge."""
 
     def __init__(self):
-        print("  Cargando RagEngine (embeddings + ChromaDB + Bedrock)...")
+        print("  Cargando RagEngine (embeddings + ChromaDB + LLM)...")
         self.engine = RagEngine()
         self.context_strategy = os.getenv("EVAL_CONTEXT_STRATEGY", "generator_context").lower().strip()
         print("  RagEngine listo.")
 
-    def query(self, question: str) -> dict:
+    def query(self, question: str, source_mode: str = "auto") -> dict:
         """
         Retorna la respuesta y la traza RAG usada para generarla.
 
@@ -26,7 +26,7 @@ class RagAdapter:
         el generador del roadmap. Esto evita que el judge evalúe con contexto
         recuperado desde otra query.
         """
-        trace = self.engine.generate_roadmap_with_trace(question)
+        trace = self.engine.generate_roadmap_with_trace(question, source_mode)
         if self.context_strategy == "legacy_original_query":
             contexts = self.engine.retrieve_contexts(question)
             trace["contexts"] = contexts
@@ -45,12 +45,15 @@ class RagAdapter:
 
         return {
             "question":               question,
+            "status":                 trace.get("status", "ACCEPTED"),
+            "source_mode":            trace.get("source_mode", source_mode),
             "query_intent":           trace.get("query_intent", {}),
             "refined_question":       trace.get("refined_question", ""),
             "answer":                 answer,
             "contexts":               contexts,
             "corpus_contexts":        trace.get("corpus_contexts", []),
             "web_contexts":           trace.get("web_contexts", []),
+            "evidence_sources":       trace.get("evidence_sources", []),
             "retrieval":              trace.get("retrieval", {}),
             "generation_trace":       trace.get("generation_trace", {}),
             "judge_context_strategy": self.context_strategy,
