@@ -13,8 +13,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 sys.path.append(BASE_DIR)
 
-from src.rag_engine import AUTO_WEB_THRESHOLD, RagEngine
-from src.source_modes import SourceMode
+from src.rag_engine import RagEngine
 
 engine = None
 
@@ -57,13 +56,15 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     question: str
-    source_mode: SourceMode = SourceMode.AUTO
+    intent: int = None  # 1/2/3: continuación de un Intent 4 clarificado (fuente elegida por el usuario)
 
 @app.post("/generate-roadmap")
 async def generate_roadmap_endpoint(request: QueryRequest):
     if not engine:
         raise HTTPException(status_code=503, detail="Motor no iniciado. Revisa la terminal.")
-    return engine.generate_roadmap(request.question, request.source_mode)
+    if request.intent not in (None, 1, 2, 3):
+        raise HTTPException(status_code=422, detail="intent debe ser 1, 2 o 3 (o ausente para clasificar)")
+    return engine.generate_roadmap(request.question, intent=request.intent)
 
 
 @app.post("/sync-notion")
@@ -147,13 +148,16 @@ async def eval_pipeline(req: PipelineRequest):
     })
 
     contexts = [c["text"] for c in retr["selected"]]
+    corpus_contexts = contexts
+    web_contexts = []
 
     # Paso 2.5: fallback web (solo si el corpus no cubre la consulta)
     if req.web_fallback:
         t0 = time.time()
-        scores  = [c.get("vector_score") for c in retr["pool"] if c.get("vector_score") is not None]
-        best    = max(scores) if scores else 0
-        covers  = engine.corpus_covers(retr)
+        scores = [c.get("vector_score") for c in retr["pool"] if c.get("vector_score") is not None]
+        best     = max(scores) if scores else 0
+        umbral   = float(os.getenv("EVAL_CORPUS_MIN_SCORE", "0.25"))
+        covers   = best >= umbral
         web_used = False
         web_sources = []
         if not covers:
@@ -170,7 +174,7 @@ async def eval_pipeline(req: PipelineRequest):
             "why":   "Permite responder aunque la base de conocimiento no cubra el tema. El contenido es efímero: no se guarda en el corpus.",
             "result": {
                 "best_corpus_score": round(best, 4),
-                "umbral":            AUTO_WEB_THRESHOLD,
+                "umbral":            umbral,
                 "corpus_suficiente": covers,
                 "web_activado":      web_used,
                 "fuentes_web":       web_sources,
@@ -180,7 +184,7 @@ async def eval_pipeline(req: PipelineRequest):
 
     # Paso 3: generacion del roadmap
     t0 = time.time()
-    roadmap  = engine.build_roadmap(req.question, refined, contexts)
+    roadmap  = engine.build_roadmap(req.question, refined, corpus_contexts, web_contexts)
     answer   = _roadmap_to_text(roadmap)
     steps.append({
         "key":   "generate",
