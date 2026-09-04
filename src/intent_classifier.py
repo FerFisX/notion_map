@@ -88,6 +88,9 @@ INTENT_CLASSIFIER_ENABLED = os.getenv("INTENT_CLASSIFIER_ENABLED", "true").lower
 # Minimum confidence to commit to an inferred intent (1/2/3). Below this the
 # classification falls back to clarify (source_ambiguous) — never assume.
 INTENT_CONFIDENCE_MIN = float(os.getenv("INTENT_CONFIDENCE_MIN", "0.5"))
+INTENT_BOUNDARY_JUDGE_ENABLED = os.getenv(
+    "INTENT_BOUNDARY_JUDGE_ENABLED", "true"
+).lower().strip() in ("true", "1", "yes")
 # CRAG gate (Interpretacion A, "gate de ausencia"): cuando el clasificador
 # decide intent 1 (kb_only), el coverage de la intencion core contra la KB
 # REAL se usa para detectar temas ausentes de la KB y rebajarlos a intent 4
@@ -530,6 +533,7 @@ class IntentClassifier:
         llm=None,
         invoke_text=None,
         semantic_embedder=None,
+        boundary_judge=None,
         warm_embeddings: bool = False,
     ):
         self.llm = llm
@@ -539,6 +543,7 @@ class IntentClassifier:
         # so duplicated the model and could trigger native DLL/ABI crashes on
         # Windows. Without an injected embedder it safely uses literal + LLM.
         self.semantic_embedder = semantic_embedder
+        self.boundary_judge = boundary_judge
         self._reference_embeddings = None
         if self._semantic_enabled and warm_embeddings:
             try:
@@ -692,12 +697,99 @@ class IntentClassifier:
                 result["semantic_trace"] = semantic_trace
             return result
 
-        # 3) LLM classification (residual / signal-free).
+        # 3) Focused judge for a genuinely close, known semantic frontier.
+        # It replaces the open classifier call for this branch; it is never an
+        # additional call. A judge fallback becomes safe ambiguity.
+        boundary_result = self._judge_semantic_boundary(q, semantic_trace)
+        if boundary_result is not None:
+            result = self._finalize(boundary_result["parsed"])
+            result["boundary_judge"] = boundary_result["trace"]
+            if semantic_trace:
+                result["semantic_trace"] = semantic_trace
+            return result
+
+        # 4) Open LLM classification for the signal-free residual.
         parsed = self._call_llm(q)
         result = self._finalize(parsed)
         if semantic_trace:
             result["semantic_trace"] = semantic_trace
         return result
+
+    @staticmethod
+    def _boundary_pair(semantic_trace: dict | None) -> list[int]:
+        """Return a supported two-intent frontier or an empty list."""
+
+        trace = semantic_trace or {}
+        top_score = float(trace.get("top_score", 0.0) or 0.0)
+        threshold = float(trace.get("threshold", 1.0) or 1.0)
+        margin = float(trace.get("margin", 1.0) or 1.0)
+        if top_score < threshold or margin >= EMBED_MARGIN:
+            return []
+        candidates = list(dict.fromkeys(
+            int(value)
+            for value in trace.get("candidate_intents", [])
+            if value in (1, 2, 3, 4)
+        ))
+        if len(candidates) < 2:
+            return []
+        pair = candidates[:2]
+        supported = {
+            frozenset((2, 3)),
+            frozenset((2, 4)),
+            frozenset((3, 4)),
+        }
+        return pair if frozenset(pair) in supported else []
+
+    def _judge_semantic_boundary(
+        self,
+        raw_query: str,
+        semantic_trace: dict | None,
+    ) -> dict | None:
+        if not INTENT_BOUNDARY_JUDGE_ENABLED:
+            return None
+        pair = self._boundary_pair(semantic_trace)
+        if not pair:
+            return None
+        if self.boundary_judge is None:
+            from src.source_intent_judge import SourceIntentJudge
+
+            self.boundary_judge = SourceIntentJudge(
+                llm=self.llm,
+                invoke_text=self.invoke_text,
+            )
+        judged = self.boundary_judge.judge(raw_query, pair)
+        intent = judged.get("intent")
+        if intent not in pair:
+            parsed = {
+                "intent": 4,
+                "decision": "clarify",
+                "clarify_type": "source_ambiguous",
+                "confidence": 0.0,
+                "rationale": judged.get("rationale", "boundary judge fallback"),
+                "decision_source": "boundary_judge_fallback",
+            }
+        elif intent == 4:
+            winner = str((semantic_trace or {}).get("winner", ""))
+            parsed = {
+                "intent": 4,
+                "decision": "clarify",
+                "clarify_type": (
+                    "external_two_way" if winner == "external"
+                    else "source_ambiguous"
+                ),
+                "confidence": judged.get("confidence", 0.0),
+                "rationale": judged.get("rationale", "ambiguous source intent"),
+                "decision_source": "boundary_judge",
+            }
+        else:
+            parsed = {
+                "intent": intent,
+                "decision": "proceed",
+                "confidence": judged.get("confidence", 0.0),
+                "rationale": judged.get("rationale", "source intent selected"),
+                "decision_source": "boundary_judge",
+            }
+        return {"parsed": parsed, "trace": judged}
 
     # -- Result builders ----------------------------------------------------
     def _enrich(self, result: dict, signals: dict) -> None:
