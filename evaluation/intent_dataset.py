@@ -38,6 +38,7 @@ class QueryCase(Enum):
 
 PRE_GATE_SAMPLES = [
     "Hello",
+    "Hola",
     "What should I cook tonight?",
 ]
 
@@ -67,6 +68,15 @@ INTENT_SAMPLES = [
     {"question": "Create a deployment roadmap.",
      "query_case": QueryCase.CLARIFY, "signal_kind": "semantic",
      "expected_clarify_type": "source_ambiguous"},
+    {"question": "Usa únicamente nuestra documentación interna para este roadmap.",
+     "query_case": QueryCase.KB_ONLY, "signal_kind": "literal"},
+    {"question": "Usa nuestra documentación interna como base y compleméntala con prácticas web actuales.",
+     "query_case": QueryCase.KB_DOMINANT, "signal_kind": "literal"},
+    {"question": "Usa las prácticas actuales de la industria como fuente principal y compara nuestra documentación.",
+     "query_case": QueryCase.WEB_DOMINANT, "signal_kind": "literal"},
+    {"question": "Busca información actualizada en internet para preparar el roadmap.",
+     "query_case": QueryCase.CLARIFY, "signal_kind": "literal",
+     "expected_clarify_type": "external_two_way"},
 ]
 
 MINIMAL_PAIRS = [

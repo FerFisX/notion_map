@@ -63,8 +63,8 @@ Rules enforced here:
     NO_RETRIEVAL_ENABLED) short-circuits BEFORE the LLM. The LLM can also emit
     clarify type "no_roadmap" for queries the gate does not catch.
 
-All model-facing prompts are in ENGLISH. End users are expected to query in
-English; the matching lists, dataset and examples are all English.
+Model-facing instructions are in English, while source signals and controlled
+examples cover both English and Spanish user queries.
 """
 
 import os
@@ -107,7 +107,8 @@ GREETING_TERMS = [
     t.strip().lower() for t in os.getenv(
         "GREETING_TERMS",
         "hi,hello,hey,good morning,good afternoon,good evening,"
-        "good day,greetings"
+        "good day,greetings,hola,buen día,buen dia,buenos días,buenos dias,"
+        "buenas tardes,buenas noches"
     ).split(",") if t.strip()
 ]
 NON_RETRIEVAL_TERMS = [
@@ -143,7 +144,12 @@ INTERNAL_ANCHOR_TERMS = [
         "as the base,as the anchor,as the foundation,"
         "documented foundation,what we have got internally,"
         "what we've got internally,we have got internally,we've got internally,"
-        "what we have documented,our documented foundation"
+        "what we have documented,our documented foundation,"
+        "documentación interna,documentacion interna,nuestra documentación interna,"
+        "nuestra documentacion interna,base de conocimiento interna,"
+        "solo nuestra documentación,solo nuestra documentacion,"
+        "únicamente nuestra documentación,unicamente nuestra documentacion,"
+        "como base,como fundamento"
     ).split(",") if t.strip()
 ]
 EXTERNAL_ANCHOR_TERMS = [
@@ -158,7 +164,11 @@ EXTERNAL_ANCHOR_TERMS = [
         "complement with web,supplement with the web,supplement with web,"
         "complement it with,top it up with,pad it with,round it out with,"
         "layer on the latest,stretch it with,current external,latest external,"
-        "newest external,with current best practices,with the latest best practices"
+        "newest external,with current best practices,with the latest best practices,"
+        "información actualizada,informacion actualizada,buscar en internet,"
+        "buscar en la web,prácticas web actuales,practicas web actuales,"
+        "fuentes externas actuales,complementar con información externa,"
+        "complementar con informacion externa,complementar con la web"
     ).split(",") if t.strip()
 ]
 # Generic advisory/recommendation phrasing tends to be source-ambiguous.
@@ -183,7 +193,9 @@ DISTRUST_TERMS = [
         "don't hold up,dont hold up,doesn't hold up,doesnt hold up,"
         "don't buy,dont buy,don't count on,dont count on,"
         "not reliable enough,falls short,doubtful of,i am skeptical of,"
-        "i am doubtful of,i don't trust"
+        "i am doubtful of,i don't trust,no confío en,no confio en,"
+        "no confiamos en,no es confiable,no podemos confiar en,"
+        "desconfío de,desconfio de"
     ).split(",") if t.strip()
 ]
 # Signal that the ANSWER is requested as current external industry practice.
@@ -194,7 +206,12 @@ EXTERNAL_AS_ANSWER_TERMS = [
         "following the current industry best practices,"
         "the most recent industry best practices,"
         "only up-to-date information,only external sources,"
-        "only the most recent information"
+        "only the most recent information,mejores prácticas actuales de la industria,"
+        "mejores practicas actuales de la industria,"
+        "prácticas actuales de la industria como fuente principal,"
+        "practicas actuales de la industria como fuente principal,"
+        "solo información actualizada,solo informacion actualizada,"
+        "solo fuentes externas"
     ).split(",") if t.strip()
 ]
 # Leisure / clearly non-technical subjects -> deterministic no_roadmap
@@ -411,6 +428,9 @@ REFERENCE_PHRASES = {
         "without going outside what we already have on file for the table design",
         "based purely on what we have recorded internally about the keys",
         "using nothing but what we have already documented about the setup",
+        "usa únicamente nuestra documentación interna",
+        "trabaja solo con nuestra base de conocimiento interna",
+        "apóyate exclusivamente en lo que documentamos internamente",
     ],
     "external": EXTERNAL_ANCHOR_TERMS + [
         "pull the latest information from the web",
@@ -427,6 +447,9 @@ REFERENCE_PHRASES = {
         "see what the field looks like today before answering",
         "bring back the newest take on this",
         "find the most current take on this before responding",
+        "busca la información más reciente en internet",
+        "consulta fuentes web actualizadas antes de responder",
+        "usa información externa vigente",
     ],
     "internal_and_external": [
         "based on our internal document and also the current web practices",
@@ -447,6 +470,9 @@ REFERENCE_PHRASES = {
         "build on our internal notes and bring in the newest external viewpoints",
         "root the answer in what we wrote internally and add recent industry techniques",
         "use our internal material as the starting point and fill in with current web practices",
+        "usa nuestra documentación interna como base y compleméntala con prácticas web actuales",
+        "parte de nuestra base de conocimiento y añade información externa actualizada",
+        "mantén nuestros documentos como fundamento y agrega evidencia reciente de la web",
     ],
     "distrust": DISTRUST_TERMS + [
         "i do not believe our documentation on this",
@@ -465,6 +491,9 @@ REFERENCE_PHRASES = {
         "what we have got on file feels shaky on this",
         "i am doubtful of what we wrote down about this",
         "dont put much stock in our own notes on this",
+        "no confíes en nuestra documentación para este tema",
+        "nuestra información interna no es suficientemente confiable",
+        "prioriza fuentes externas porque nuestros documentos pueden estar desactualizados",
     ],
     "as_answer": EXTERNAL_AS_ANSWER_TERMS + [
         "give me the industry standard answer",
@@ -475,6 +504,9 @@ REFERENCE_PHRASES = {
         "deliver the current industry standard solution",
         "the answer should come from the latest techniques",
         "answer based on what is the accepted practice now",
+        "usa las prácticas actuales de la industria como fuente principal",
+        "responde según las mejores prácticas vigentes",
+        "basa la respuesta únicamente en fuentes externas actualizadas",
     ],
     "soft": SOFT_ADVISORY_TERMS + [
         "recommend a solid approach",

@@ -126,6 +126,8 @@ La capa semántica del clasificador reutiliza el mismo modelo de embeddings que
 ya inicializa `RagEngine`. No carga una segunda instancia de
 `SentenceTransformer`; esto reduce memoria, evita conflictos de librerías
 nativas y mantiene una sola representación semántica en el runtime.
+La taxonomía incluye señales y casos controlados equivalentes en inglés y
+español para que el modo automático no dependa del idioma de la interfaz.
 
 Los módulos de reranking, rechazo OOD, CRAG y judge especializados que llegaron
 con el clasificador se mantienen bajo integración progresiva. El rejector OOD
