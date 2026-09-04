@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from src import rag_engine as rag_module
 from src.rag_engine import RagEngine
+from src.intent_classifier import IntentClassifier
 from src.source_intent_integration import build_source_intent_plan
 
 
@@ -69,6 +70,17 @@ def validate_plan_matrix():
     )
     assert no_roadmap.no_retrieval
 
+    # Rejector output is observational and must not override a valid source
+    # contract until its operating threshold is separately validated.
+    observed_reject = _classification(2, "kb_plus_external")
+    observed_reject.update({
+        "reject": True,
+        "reject_score": 0.9,
+        "reject_reason": "weak_evidence",
+    })
+    unchanged = build_source_intent_plan("auto", observed_reject)
+    assert (unchanged.strategy, unchanged.preference) == ("hybrid", "corpus")
+
 
 def validate_hybrid_priority():
     engine = RagEngine.__new__(RagEngine)
@@ -96,9 +108,35 @@ def validate_hybrid_priority():
     ]
 
 
+def validate_shared_embedding_adapter():
+    class FakeSharedEmbedder:
+        def __init__(self):
+            self.document_calls = 0
+            self.query_calls = 0
+
+        def embed_documents(self, texts):
+            self.document_calls += 1
+            return [[float(len(text)), 1.0] for text in texts]
+
+        def embed_query(self, text):
+            self.query_calls += 1
+            return [float(len(text)), 1.0]
+
+    shared = FakeSharedEmbedder()
+    classifier = IntentClassifier(semantic_embedder=shared)
+    references = classifier._get_reference_embeddings()
+    classifier._embed_query("controlled query")
+    assert references
+    assert shared.document_calls == len(references)
+    assert shared.query_calls == 1
+    first_vector = next(iter(references.values()))[0]
+    assert abs(sum(value * value for value in first_vector) - 1.0) < 1e-9
+
+
 def main():
     validate_plan_matrix()
     validate_hybrid_priority()
+    validate_shared_embedding_adapter()
     print("Source-intent integration validation: PASS")
 
 

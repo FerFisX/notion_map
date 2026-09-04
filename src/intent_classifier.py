@@ -70,6 +70,7 @@ English; the matching lists, dataset and examples are all English.
 import os
 import re
 import json
+import math
 
 from src.llm_provider import get_query_preprocessing_llm, invoke_llm_text
 
@@ -513,38 +514,6 @@ REFERENCE_PHRASES = {
     ],
 }
 
-# Lazy embedder + cached reference vectors (module level, loaded once).
-_embed_model = None
-_ref_embeddings = None
-
-
-def _get_embedder():
-    """Lazy sentence-transformer model (same pattern as similarity_metrics).
-    Kept private here so src/ never depends on the evaluation tree."""
-    global _embed_model
-    if _embed_model is None:
-        from sentence_transformers import SentenceTransformer
-        _embed_model = SentenceTransformer(EMBED_MODEL)
-    return _embed_model
-
-
-def _get_reference_embeddings() -> dict:
-    """Encodes REFERENCE_PHRASES once per process. Returns
-    {category: numpy matrix (n_phrases, dim)} with L2-normalized rows."""
-    global _ref_embeddings
-    if _ref_embeddings is None:
-        model = _get_embedder()
-        _ref_embeddings = {}
-        for category, phrases in REFERENCE_PHRASES.items():
-            normalized = [p.strip().lower() for p in phrases if p and p.strip()]
-            if not normalized:
-                continue
-            _ref_embeddings[category] = model.encode(
-                normalized, normalize_embeddings=True
-            )
-    return _ref_embeddings
-
-
 def _category_threshold(category: str) -> float:
     """Per-category threshold (EMBED_CATEGORY_THRESHOLDS) or the global
     EMBED_THRESHOLD for categories without an explicit override."""
@@ -560,20 +529,22 @@ class IntentClassifier:
         *,
         llm=None,
         invoke_text=None,
+        semantic_embedder=None,
         warm_embeddings: bool = False,
     ):
-        # Warm the semantic layer (embeddings -> torch) BEFORE building the LLM.
-        # Loading sentence-transformers/torch first avoids a Windows OpenMP ABI
-        # clash (access violation 0xC0000005) when langchain (ChatOllama) is
-        # imported while torch is loaded afterwards. No-op if disabled or the
-        # model is unavailable (the 2b layer degrades gracefully to the LLM).
-        if EMBED_ENABLED and warm_embeddings:
-            try:
-                _get_reference_embeddings()
-            except Exception:
-                pass
         self.llm = llm
         self.invoke_text = invoke_text
+        # Runtime receives RagEngine.embeddings. The classifier deliberately
+        # does not import or initialize SentenceTransformer on its own: doing
+        # so duplicated the model and could trigger native DLL/ABI crashes on
+        # Windows. Without an injected embedder it safely uses literal + LLM.
+        self.semantic_embedder = semantic_embedder
+        self._reference_embeddings = None
+        if self._semantic_enabled and warm_embeddings:
+            try:
+                self._get_reference_embeddings()
+            except Exception:
+                pass
         # CRAG gate (Interpretacion A, modo "gate de ausencia"): el coverage de
         # la intencion core contra la KB REAL rebaja un caso 1 (kb_only) a
         # caso 4 (clarify kb_absent) cuando el tema no esta en la KB. El handle
@@ -582,6 +553,59 @@ class IntentClassifier:
         # cuando el gate esta apagado). Sin handle disponible, el gate no
         # rebaja nada (comportamiento actual intacto).
         self.coverage_retriever = coverage_retriever
+
+    @property
+    def _semantic_enabled(self) -> bool:
+        return EMBED_ENABLED and self.semantic_embedder is not None
+
+    @staticmethod
+    def _normalize_vector(vector) -> list[float]:
+        values = [float(value) for value in vector]
+        norm = math.sqrt(sum(value * value for value in values))
+        if not norm:
+            return values
+        return [value / norm for value in values]
+
+    def _embed_documents(self, texts: list[str]) -> list[list[float]]:
+        embedder = self.semantic_embedder
+        if hasattr(embedder, "embed_documents"):
+            vectors = embedder.embed_documents(texts)
+        elif hasattr(embedder, "encode"):
+            vectors = embedder.encode(texts, normalize_embeddings=True)
+        else:
+            raise TypeError(
+                "semantic_embedder must provide embed_documents() or encode()"
+            )
+        return [self._normalize_vector(vector) for vector in vectors]
+
+    def _embed_query(self, text: str) -> list[float]:
+        embedder = self.semantic_embedder
+        if hasattr(embedder, "embed_query"):
+            vector = embedder.embed_query(text)
+        elif hasattr(embedder, "encode"):
+            vector = embedder.encode(text, normalize_embeddings=True)
+        else:
+            raise TypeError(
+                "semantic_embedder must provide embed_query() or encode()"
+            )
+        return self._normalize_vector(vector)
+
+    def _get_reference_embeddings(self) -> dict[str, list[list[float]]]:
+        """Encode reference clusters once with the injected shared model."""
+
+        if self._reference_embeddings is None:
+            self._reference_embeddings = {}
+            for category, phrases in REFERENCE_PHRASES.items():
+                values = [
+                    phrase.strip().lower()
+                    for phrase in phrases
+                    if phrase and phrase.strip()
+                ]
+                if values:
+                    self._reference_embeddings[category] = (
+                        self._embed_documents(values)
+                    )
+        return self._reference_embeddings
 
     # -- Public API ---------------------------------------------------------
     def classify(self, raw_query: str) -> dict:
@@ -632,7 +656,7 @@ class IntentClassifier:
         # deterministic matching instead of the LLM.
         semantic_result = None
         semantic_trace = None
-        if EMBED_ENABLED:
+        if self._semantic_enabled:
             semantic_result, semantic_trace = self._semantic_match(q)
         if semantic_result is not None:
             if semantic_result.get("decision") == "no_retrieval":
@@ -737,7 +761,9 @@ class IntentClassifier:
 
         result["taxonomy_version"] = TAXONOMY_VERSION
         result["classifier_version"] = CLASSIFIER_VERSION
-        result["embedding_model_version"] = EMBEDDING_MODEL_VERSION if EMBED_ENABLED else None
+        result["embedding_model_version"] = (
+            EMBEDDING_MODEL_VERSION if self._semantic_enabled else None
+        )
 
     def _deterministic_policy(self, raw_query: str, sig: dict):
         """Implements the DECISION TABLE steps A-E on the precomputed signals,
@@ -801,19 +827,21 @@ class IntentClassifier:
         if not q or len(q) < 4:
             return None, None
         try:
-            import numpy as np
-            refs = _get_reference_embeddings()
+            refs = self._get_reference_embeddings()
             if not refs:
                 return None, None
-            query_vec = _get_embedder().encode(q, normalize_embeddings=True)
+            query_vec = self._embed_query(q)
         except Exception as e:
             print(f"  [Intent Classifier] embedding layer unavailable ({e}); skipping 2b.")
             return None, None
 
         scores = {}
         for category, vectors in refs.items():
-            sims = vectors @ query_vec
-            scores[category] = float(np.max(sims))
+            similarities = [
+                sum(left * right for left, right in zip(vector, query_vec))
+                for vector in vectors
+            ]
+            scores[category] = max(similarities)
 
         ranking = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
         winner, top_score = ranking[0]

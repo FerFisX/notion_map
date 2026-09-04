@@ -122,11 +122,18 @@ La traza de generación registra `source_intent`, `source_intent_plan`, la
 decisión automática y el modo efectivo. No se fuerzan porcentajes artificiales:
 el reparto final depende de las fuentes que realmente respaldan los pasos.
 
+La capa semántica del clasificador reutiliza el mismo modelo de embeddings que
+ya inicializa `RagEngine`. No carga una segunda instancia de
+`SentenceTransformer`; esto reduce memoria, evita conflictos de librerías
+nativas y mantiene una sola representación semántica en el runtime.
+
 Los módulos de reranking, rechazo OOD, CRAG y judge especializados que llegaron
-con el clasificador permanecen como herramientas experimentales de evaluación;
-no forman parte del flujo principal hasta ser validados. Sus casos controlados
-están separados en `evaluation/intent_dataset.py` para no alterar el dataset de
-calidad de roadmaps.
+con el clasificador se mantienen bajo integración progresiva. El rejector OOD
+ya se registra en `source_intent` como diagnóstico (`reject`, `reject_score` y
+`reject_reason`), pero no bloquea ni modifica el routing. Reranking, CRAG y el
+judge especializado todavía no forman parte del flujo principal. Sus casos
+controlados están separados en `evaluation/intent_dataset.py` para no alterar
+el dataset de calidad de roadmaps.
 
 Validación offline de la integración:
 

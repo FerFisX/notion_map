@@ -669,9 +669,18 @@ def evaluate_rejector(ood_samples, id_samples, classifier=None, verbose: bool = 
     }
 
 
-def run_intent_evaluation(samples, pre_gate_samples=None, adversarial_samples=None,
-                          paraphrase_samples=None, verbose: bool = False) -> dict:
-    classifier = IntentClassifier()
+def run_intent_evaluation(
+    samples,
+    pre_gate_samples=None,
+    adversarial_samples=None,
+    paraphrase_samples=None,
+    verbose: bool = False,
+    semantic_embedder=None,
+) -> dict:
+    # The evaluator never initializes SentenceTransformer independently.
+    # Runtime-semantic checks must inject the embedder already owned by
+    # RagEngine; otherwise this safely evaluates the literal + LLM layers.
+    classifier = IntentClassifier(semantic_embedder=semantic_embedder)
 
     entries, n_clarify_checked, n_clarify_type_ok = _evaluate_samples(
         classifier, samples, "eval", verbose=verbose)
