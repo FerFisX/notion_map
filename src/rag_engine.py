@@ -6,6 +6,9 @@ from typing import Any, List
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import PromptTemplate
@@ -38,9 +41,6 @@ from src.web_search import (
     requires_current_web_evidence,
     search_web_sources,
 )
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 DB_PATH = os.path.join(BASE_DIR, "vectorstore", "chroma_db")
 
@@ -421,9 +421,22 @@ class RagEngine:
 
                 self._source_intent_classifier = IntentClassifier(
                     invoke_text=self._invoke_preprocessing,
+                    semantic_embedder=self.embeddings,
                     warm_embeddings=False,
                 )
-            return self._source_intent_classifier.classify(query)
+            result = self._source_intent_classifier.classify(query)
+            try:
+                from src.rejector import reject
+
+                # Diagnostic only: the source plan deliberately ignores these
+                # fields until OOD false-positive rates have been validated.
+                return reject(result, query)
+            except Exception as reject_exc:
+                result["reject"] = False
+                result["reject_score"] = None
+                result["reject_reason"] = "diagnostic_unavailable"
+                result["reject_error"] = str(reject_exc)[:200]
+                return result
         except Exception as exc:
             print(
                 "  [Source Intent] Classification unavailable; using the "
