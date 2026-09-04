@@ -130,8 +130,10 @@ nativas y mantiene una sola representación semántica en el runtime.
 Los módulos de reranking, rechazo OOD, CRAG y judge especializados que llegaron
 con el clasificador se mantienen bajo integración progresiva. El rejector OOD
 ya se registra en `source_intent` como diagnóstico (`reject`, `reject_score` y
-`reject_reason`), pero no bloquea ni modifica el routing. Reranking, CRAG y el
-judge especializado todavía no forman parte del flujo principal. Sus casos
+`reject_reason`), pero no bloquea ni modifica el routing. El judge especializado
+solo interviene cuando dos intenciones forman una frontera semántica cercana;
+reemplaza la clasificación abierta en esa rama y no agrega otra llamada. El
+reranker y CRAG todavía no forman parte del flujo principal. Los casos
 controlados están separados en `evaluation/intent_dataset.py` para no alterar
 el dataset de calidad de roadmaps.
 

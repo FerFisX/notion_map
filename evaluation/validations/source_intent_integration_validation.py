@@ -5,6 +5,7 @@ from unittest.mock import patch
 from src import rag_engine as rag_module
 from src.rag_engine import RagEngine
 from src.intent_classifier import IntentClassifier
+from src.source_intent_judge import SourceIntentJudge
 from src.source_intent_integration import build_source_intent_plan
 
 
@@ -133,10 +134,42 @@ def validate_shared_embedding_adapter():
     assert abs(sum(value * value for value in first_vector) - 1.0) < 1e-9
 
 
+def validate_focused_boundary_judge():
+    calls = []
+
+    def fake_invoke(prompt, operation):
+        calls.append((prompt, operation))
+        return '{"intent": 2, "confidence": 0.88, "rationale": "KB remains the base."}'
+
+    judge = SourceIntentJudge(invoke_text=fake_invoke)
+    judged = judge.judge("Use our notes as the base and add web context.", [2, 3])
+    assert judged["intent"] == 2
+    assert judged["source"] == "boundary_judge"
+    assert calls[0][1] == "Source Intent Boundary Judge"
+
+    classifier = IntentClassifier(boundary_judge=judge)
+    trace = {
+        "top_score": 0.60,
+        "threshold": 0.55,
+        "margin": 0.01,
+        "winner": "internal_and_external",
+        "candidate_intents": [2, 3],
+    }
+    assert classifier._boundary_pair(trace) == [2, 3]
+    resolved = classifier._judge_semantic_boundary("controlled", trace)
+    assert resolved["parsed"]["intent"] == 2
+    assert resolved["parsed"]["decision_source"] == "boundary_judge"
+
+    assert classifier._boundary_pair({**trace, "top_score": 0.40}) == []
+    assert classifier._boundary_pair({**trace, "margin": 0.20}) == []
+    assert classifier._boundary_pair({**trace, "candidate_intents": [1, 2]}) == []
+
+
 def main():
     validate_plan_matrix()
     validate_hybrid_priority()
     validate_shared_embedding_adapter()
+    validate_focused_boundary_judge()
     print("Source-intent integration validation: PASS")
 
 
