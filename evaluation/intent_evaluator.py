@@ -66,10 +66,9 @@ from src.intent_classifier import (
     _NO_RETRIEVAL_RE,
 )
 from evaluation.config import config
-from evaluation.dataset import (
-    EVAL_SAMPLES, PRE_GATE_SAMPLES, ADVERSARIAL_SAMPLES, PARAPHRASE_SAMPLES,
-    INTENT_SAMPLES, MINIMAL_PAIRS, OOD_SAMPLES,
-    QueryCase,
+from evaluation.intent_dataset import (
+    PRE_GATE_SAMPLES, ADVERSARIAL_SAMPLES, PARAPHRASE_SAMPLES,
+    INTENT_SAMPLES, MINIMAL_PAIRS, OOD_SAMPLES, QueryCase,
 )
 
 REPORTS_DIR = Path(config.reports_dir) / "intent_runs"
@@ -1096,7 +1095,7 @@ if __name__ == "__main__":
 
     if args.reranker:
         from src.reranker import get_reranker
-        from evaluation.dataset import MINIMAL_PAIRS, INTENT_SAMPLES as _RANK_SAMPLES
+        from evaluation.intent_dataset import MINIMAL_PAIRS, INTENT_SAMPLES as _RANK_SAMPLES
         from src.intent_spec import INTENT_SPECS
         print("\n--- SPRINT 4: RERANKER DIAGNOSTIC (offline, no decision rewired) ---")
         rr = get_reranker()
@@ -1115,7 +1114,7 @@ if __name__ == "__main__":
                       f"rr={st['rr_ok']}/{st['n']}")
 
     if args.reject:
-        from evaluation.dataset import INTENT_SAMPLES, MINIMAL_PAIRS, OOD_SAMPLES, PARAPHRASE_SAMPLES
+        from evaluation.intent_dataset import INTENT_SAMPLES, MINIMAL_PAIRS, OOD_SAMPLES, PARAPHRASE_SAMPLES
         print("\n--- SPRINT 5: REJECTOR OOD DISCRIMINATION (offline) ---")
         in_dist = list(INTENT_SAMPLES) + list(MINIMAL_PAIRS)
         if not in_dist:

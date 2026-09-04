@@ -92,3 +92,44 @@ Para un smoke de developer sin MLflow:
 ```bash
 python -m evaluation.benchmarks.roadmap_generation_benchmark --sample-indices 15 --source-mode corpus --run-name corpus-ollama-smoke --no-mlflow
 ```
+
+## Integración del clasificador de intención y las fuentes
+
+El clasificador incorporado por el trabajo externo y los modos de fuentes del
+proyecto cumplen responsabilidades distintas y se fusionan sin reemplazarse:
+
+- El **selector de la interfaz** expresa una decisión explícita del usuario.
+  `corpus` y `web` son obligatorios y omiten el clasificador.
+- El **clasificador de intención de fuentes** se ejecuta únicamente en `auto` y
+  detecta si la consulta pide base interna, combinación con prioridad interna o
+  combinación con prioridad web.
+- El **router de recuperación existente** comprueba cobertura real y vigencia.
+  Si la intención es ambigua o el clasificador falla, conserva el comportamiento
+  automático anterior basado en esos datos.
+- El **grounding gate existente** sigue verificando que cada paso cite una de las
+  evidencias recuperadas. El entrenamiento del LLM no se acepta como fuente.
+
+| Selección | Clasificador | Recuperación resultante |
+|---|---|---|
+| `corpus` | Omitido | Solo corpus; falla si la evidencia es insuficiente |
+| `web` | Omitido | Solo web; falla si no hay resultados utilizables |
+| `auto` + KB only | Aplicado | Solo corpus |
+| `auto` + KB + external | Aplicado | Híbrida, evidencia interna primero |
+| `auto` + external + KB | Aplicado | Híbrida, evidencia web primero |
+| `auto` + ambiguo/error | Aplicado con fallback | Router previo por cobertura/vigencia |
+
+La traza de generación registra `source_intent`, `source_intent_plan`, la
+decisión automática y el modo efectivo. No se fuerzan porcentajes artificiales:
+el reparto final depende de las fuentes que realmente respaldan los pasos.
+
+Los módulos de reranking, rechazo OOD, CRAG y judge especializados que llegaron
+con el clasificador permanecen como herramientas experimentales de evaluación;
+no forman parte del flujo principal hasta ser validados. Sus casos controlados
+están separados en `evaluation/intent_dataset.py` para no alterar el dataset de
+calidad de roadmaps.
+
+Validación offline de la integración:
+
+```bash
+python -m evaluation.validations.source_intent_integration_validation
+```

@@ -134,6 +134,13 @@ function showUserError(error) {
     message.classList.remove('hidden', 'technical');
     document.getElementById('userMessageActions').replaceChildren();
 
+    if (status === 'NO_ROADMAP') {
+        title.innerText = 'Esta solicitud no necesita un roadmap';
+        text.innerText = 'Reformula la pregunta como un proceso u objetivo técnico si deseas generar una guía paso a paso.';
+        addUserMessageAction('Editar pregunta', editCurrentQuestion);
+        return;
+    }
+
     if (status === 'INSUFFICIENT_EVIDENCE') {
         if (activeSourceMode === 'corpus') {
             title.innerText = 'No encontramos suficiente información en la base interna';
