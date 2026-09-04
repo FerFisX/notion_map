@@ -71,7 +71,7 @@ import os
 import re
 import json
 
-from src.llm_provider import get_llm
+from src.llm_provider import get_query_preprocessing_llm, invoke_llm_text
 
 # ---------------------------------------------------------------------------
 # Versioning (Sprint 2 / point 29) — reproducibility of intent decisions.
@@ -554,18 +554,26 @@ def _category_threshold(category: str) -> float:
 class IntentClassifier:
     """Pre-retrieval intent classifier based only on the raw user prompt."""
 
-    def __init__(self, coverage_retriever=None):
+    def __init__(
+        self,
+        coverage_retriever=None,
+        *,
+        llm=None,
+        invoke_text=None,
+        warm_embeddings: bool = False,
+    ):
         # Warm the semantic layer (embeddings -> torch) BEFORE building the LLM.
         # Loading sentence-transformers/torch first avoids a Windows OpenMP ABI
         # clash (access violation 0xC0000005) when langchain (ChatOllama) is
         # imported while torch is loaded afterwards. No-op if disabled or the
         # model is unavailable (the 2b layer degrades gracefully to the LLM).
-        if EMBED_ENABLED:
+        if EMBED_ENABLED and warm_embeddings:
             try:
                 _get_reference_embeddings()
             except Exception:
                 pass
-        self.llm = get_llm(temperature=0.0, max_tokens=800)
+        self.llm = llm
+        self.invoke_text = invoke_text
         # CRAG gate (Interpretacion A, modo "gate de ausencia"): el coverage de
         # la intencion core contra la KB REAL rebaja un caso 1 (kb_only) a
         # caso 4 (clarify kb_absent) cuando el tema no esta en la KB. El handle
@@ -1105,7 +1113,19 @@ class IntentClassifier:
                    "clarify_type": "source_ambiguous",
                    "rationale": "classification failed; clarify by default"}
         try:
-            raw = self.llm.invoke(prompt).content.strip()
+            if self.invoke_text is not None:
+                raw = str(self.invoke_text(prompt, "Source Intent Classification")).strip()
+            else:
+                if self.llm is None:
+                    self.llm = get_query_preprocessing_llm(
+                        temperature=0.0,
+                        max_tokens=800,
+                    )
+                raw = invoke_llm_text(
+                    self.llm,
+                    prompt,
+                    operation="Source Intent Classification",
+                ).strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
                 if raw.startswith("json"):

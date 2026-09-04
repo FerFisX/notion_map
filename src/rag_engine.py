@@ -28,6 +28,10 @@ from src.source_modes import (
     normalize_source_mode,
     timeout_for_mode,
 )
+from src.source_intent_integration import (
+    SourceIntentPlan,
+    build_source_intent_plan,
+)
 from src.web_search import (
     build_web_query_candidates,
     prepare_web_query,
@@ -382,6 +386,9 @@ class RagEngine:
         self._last_build_diagnostics = {}
         self._active_pipeline_deadline: float | None = None
         self._active_source_mode = SourceMode.AUTO
+        # The source-intent classifier is loaded only when auto mode needs it.
+        # Corpus and web requests keep their established startup/runtime cost.
+        self._source_intent_classifier = None
 
     def _remaining_pipeline_seconds(self) -> float:
         """Return remaining request budget or the legacy request timeout."""
@@ -404,6 +411,32 @@ class RagEngine:
             operation=operation,
             timeout_seconds=self._remaining_pipeline_seconds(),
         )
+
+    def _classify_source_preference(self, query: str) -> dict[str, Any]:
+        """Infer source preference without making it a hard dependency."""
+
+        try:
+            if self._source_intent_classifier is None:
+                from src.intent_classifier import IntentClassifier
+
+                self._source_intent_classifier = IntentClassifier(
+                    invoke_text=self._invoke_preprocessing,
+                    warm_embeddings=False,
+                )
+            return self._source_intent_classifier.classify(query)
+        except Exception as exc:
+            print(
+                "  [Source Intent] Classification unavailable; using the "
+                f"coverage router ({type(exc).__name__}: {exc})."
+            )
+            return {
+                "intent": 4,
+                "label": "ambiguous",
+                "confidence": 0.0,
+                "decision": "clarify",
+                "rationale": "source classifier unavailable; coverage router fallback",
+                "decision_source": "fallback",
+            }
 
     def _generation_budget_seconds(self) -> float:
         """Reserve part of the shared deadline for evidence validation."""
@@ -756,9 +789,11 @@ class RagEngine:
         refined_query: str,
         web_query: str | None = None,
         source_mode: SourceMode | str | None = None,
+        source_plan: SourceIntentPlan | None = None,
     ) -> dict:
         """Retrieve evidence under an explicit, request-scoped source policy."""
         requested_mode = normalize_source_mode(source_mode)
+        plan = source_plan or build_source_intent_plan(requested_mode)
         effective_web_query = prepare_web_query(web_query or refined_query)
         original_query = effective_web_query or refined_query
         self._last_web_search_attempts = []
@@ -769,7 +804,7 @@ class RagEngine:
         original_best = 0.0
         refined_best = 0.0
         corpus_selection_query = "none"
-        if requested_mode is not SourceMode.WEB:
+        if plan.strategy != "web":
             retrieval_started = time.perf_counter()
             original_retrieval = self.retrieve_contexts_scored(original_query)
             original_scores = [
@@ -814,14 +849,17 @@ class RagEngine:
         automatic_decision = "explicit_mode"
         current_web_required = requires_current_web_evidence(original_query)
 
-        if requested_mode is SourceMode.CORPUS:
+        if plan.strategy == "corpus":
             if not corpus_candidates or best < CORPUS_STRICT_MIN:
                 raise InsufficientEvidenceError(
                     "The internal corpus does not contain sufficiently relevant evidence "
                     f"(best score={best:.3f}, required={CORPUS_STRICT_MIN:.3f})."
                 )
             corpus_sources = corpus_candidates
-        elif requested_mode is SourceMode.WEB:
+            if requested_mode is SourceMode.AUTO:
+                effective_mode = "corpus"
+                automatic_decision = plan.reason
+        elif plan.strategy == "web":
             web_started = time.perf_counter()
             web_sources, effective_web_query, web_attempts = (
                 self._search_web_with_fallback(
@@ -836,6 +874,33 @@ class RagEngine:
                 raise InsufficientEvidenceError(
                     "Web search did not return usable evidence."
                 )
+            if requested_mode is SourceMode.AUTO:
+                effective_mode = "web"
+                automatic_decision = plan.reason
+        elif plan.strategy == "hybrid":
+            if not corpus_candidates or best < CORPUS_STRICT_MIN:
+                raise InsufficientEvidenceError(
+                    "The requested hybrid strategy could not obtain sufficiently "
+                    "relevant corpus evidence "
+                    f"(best score={best:.3f}, required={CORPUS_STRICT_MIN:.3f})."
+                )
+            web_started = time.perf_counter()
+            web_sources, effective_web_query, web_attempts = (
+                self._search_web_with_fallback(
+                    effective_web_query,
+                    refined_query,
+                    max_results=4,
+                )
+            )
+            self._last_web_search_attempts = web_attempts
+            web_search_seconds = round(time.perf_counter() - web_started, 4)
+            if not web_sources:
+                raise InsufficientEvidenceError(
+                    "The requested hybrid strategy could not obtain web evidence."
+                )
+            corpus_sources = corpus_candidates
+            effective_mode = "hybrid"
+            automatic_decision = plan.reason
         else:
             if current_web_required:
                 effective_mode = "web"
@@ -887,7 +952,10 @@ class RagEngine:
                             f"for corpus score {best:.3f}."
                         )
 
-        evidence_sources = web_sources + corpus_sources
+        if plan.preference == "corpus":
+            evidence_sources = corpus_sources + web_sources
+        else:
+            evidence_sources = web_sources + corpus_sources
         if not evidence_sources:
             raise InsufficientEvidenceError(
                 "The selected source mode returned no usable evidence."
@@ -896,7 +964,7 @@ class RagEngine:
         web_contexts = [source["text"] for source in web_sources]
 
         return {
-            "contexts":        web_contexts + corpus_contexts,  # web primero
+            "contexts":        [source["text"] for source in evidence_sources],
             "evidence_sources": evidence_sources,
             "corpus_contexts": corpus_contexts,
             "web_contexts":    web_contexts,
@@ -909,6 +977,7 @@ class RagEngine:
             "requested_mode":  requested_mode.value,
             "mode":            effective_mode,
             "automatic_decision": automatic_decision,
+            "source_intent_plan": plan.to_trace(),
             "current_web_required": current_web_required,
             "web_search_query": effective_web_query,
             "web_search_attempts": list(self._last_web_search_attempts),
@@ -1095,6 +1164,7 @@ Return every step exactly once and in the supplied order.
         self._active_source_mode = requested_mode
         self._active_pipeline_deadline = time.monotonic() + pipeline_timeout
         stage_timings = {
+            "source_intent_classification_s": 0.0,
             "query_preprocessing_s": 0.0,
             "intent_classification_s": 0.0,
             "query_refinement_s": 0.0,
@@ -1106,10 +1176,75 @@ Return every step exactly once and in the supplied order.
         }
         src: dict[str, Any] = {}
         query_intent: dict[str, Any] = {"intent": "error", "confidence": 0.0}
+        source_intent: dict[str, Any] = {}
+        source_plan = build_source_intent_plan(requested_mode)
         refined_query = ""
         generation_runs: list[dict[str, Any]] = []
         grounding_result: dict[str, Any] = {}
         try:
+            if requested_mode is SourceMode.AUTO:
+                source_intent_started = time.perf_counter()
+                source_intent = self._classify_source_preference(query)
+                stage_timings["source_intent_classification_s"] = round(
+                    time.perf_counter() - source_intent_started, 4
+                )
+                source_plan = build_source_intent_plan(
+                    requested_mode,
+                    source_intent,
+                )
+            if source_plan.no_retrieval:
+                clarify = source_intent.get("clarify") or {}
+                message = str(
+                    clarify.get("question")
+                    or "This request does not require a technical roadmap."
+                )
+                roadmap = {
+                    "title": "Roadmap not applicable",
+                    "steps": [],
+                    "status": "NO_ROADMAP",
+                    "message": message,
+                    "sources": {
+                        "corpus_pct": 0,
+                        "web_pct": 0,
+                        "mode": "none",
+                        "requested_mode": requested_mode.value,
+                    },
+                }
+                return {
+                    "question": query,
+                    "query_intent": query_intent,
+                    "source_intent": source_intent,
+                    "refined_question": "",
+                    "source_mode": requested_mode.value,
+                    "status": "NO_ROADMAP",
+                    "contexts": [],
+                    "evidence_sources": [],
+                    "corpus_contexts": [],
+                    "web_contexts": [],
+                    "retrieval": {
+                        "mode": "none",
+                        "automatic_decision": source_plan.reason,
+                        "source_intent_plan": source_plan.to_trace(),
+                        "n_contexts": 0,
+                    },
+                    "generation_trace": {
+                        "timings": {
+                            **stage_timings,
+                            "total_generation_s": round(
+                                time.perf_counter() - total_started, 4
+                            ),
+                        },
+                        "provider": os.getenv(
+                            "LLM_PROVIDER", "ollama"
+                        ).lower().strip(),
+                        "model": active_model_name(),
+                        "requested_source_mode": requested_mode.value,
+                        "effective_source_mode": "none",
+                        "source_intent_plan": source_plan.to_trace(),
+                        "pipeline_timeout_seconds": pipeline_timeout,
+                    },
+                    "roadmap": roadmap,
+                }
             if QUERY_INTENT_ENABLED and QUERY_PREPROCESSING_MODE == "merged":
                 preprocessing_started = time.perf_counter()
                 query_intent, refined_query = self.analyze_and_rewrite_query(query)
@@ -1136,6 +1271,7 @@ Return every step exactly once and in the supplied order.
                 refined_query,
                 web_query=query,
                 source_mode=requested_mode,
+                source_plan=source_plan,
             )
             stage_timings.update(src.get("timings", {}))
             generation_started = time.perf_counter()
@@ -1242,6 +1378,9 @@ Return every step exactly once and in the supplied order.
                 "refined_corpus_score": src["refined_corpus_score"],
                 "corpus_selection_query": src["corpus_selection_query"],
                 "automatic_decision": src["automatic_decision"],
+                "source_intent_plan": src.get(
+                    "source_intent_plan", source_plan.to_trace()
+                ),
                 "current_web_required": src["current_web_required"],
                 "n_corpus_chunks": len(src["corpus_contexts"]),
                 "n_web_chunks":    len(src["web_contexts"]),
@@ -1311,6 +1450,7 @@ Return every step exactly once and in the supplied order.
             return {
                 "question":            query,
                 "query_intent":        query_intent,
+                "source_intent":       source_intent,
                 "refined_question":    refined_query,
                 "web_search_query":   src["web_search_query"],
                 "source_mode":        requested_mode.value,
@@ -1326,6 +1466,9 @@ Return every step exactly once and in the supplied order.
                     "refined_corpus_score": src["refined_corpus_score"],
                     "corpus_selection_query": src["corpus_selection_query"],
                     "automatic_decision": src["automatic_decision"],
+                    "source_intent_plan": src.get(
+                        "source_intent_plan", source_plan.to_trace()
+                    ),
                     "current_web_required": src["current_web_required"],
                     "n_contexts":      len(src["contexts"]),
                     "n_corpus_chunks": len(src["corpus_contexts"]),
@@ -1373,6 +1516,7 @@ Return every step exactly once and in the supplied order.
             return {
                 "question":         query,
                 "query_intent":     query_intent,
+                "source_intent":    source_intent,
                 "refined_question": refined_query,
                 "source_mode":      requested_mode.value,
                 "status":           status,
@@ -1395,6 +1539,7 @@ Return every step exactly once and in the supplied order.
                     "provider": os.getenv("LLM_PROVIDER", "ollama").lower().strip(),
                     "model": active_model_name(),
                     "requested_source_mode": requested_mode.value,
+                    "source_intent_plan": source_plan.to_trace(),
                     "pipeline_timeout_seconds": pipeline_timeout,
                     "generation_reasoning_mode": os.getenv(
                         "LLM_GENERATION_REASONING_MODE", "provider_default"

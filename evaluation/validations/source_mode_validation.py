@@ -283,7 +283,13 @@ def _validate_end_to_end_status_contract() -> None:
         }],
         "trace": {"elapsed_s": 0.0},
     }
-    with patch.object(rag_module, "QUERY_INTENT_ENABLED", False):
+    with (
+        patch.object(rag_module, "QUERY_INTENT_ENABLED", False),
+        patch.dict(
+            source_mode_module.SOURCE_MODE_TIMEOUTS,
+            {SourceMode.CORPUS: 120.0},
+        ),
+    ):
         result = engine.generate_roadmap_with_trace(
             "controlled", source_mode="corpus"
         )
